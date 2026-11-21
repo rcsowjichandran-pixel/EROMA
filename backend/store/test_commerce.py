@@ -1,13 +1,15 @@
 from decimal import Decimal
+from unittest.mock import patch
 from urllib.parse import urlparse, parse_qs
 
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from .models import Address, Category, Coupon, CouponRedemption, Order, OrderItem, Product, ProductReview, WishlistItem
+from .models import Address, Category, ContactMessage, Coupon, CouponRedemption, Order, OrderItem, Product, ProductReview, WishlistItem
 
 
+@override_settings(SECURE_SSL_REDIRECT=False)
 class CommerceApiTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("shopper", "shopper@example.com", "GoodPassword123!")
@@ -34,8 +36,10 @@ class CommerceApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         order = Order.objects.get(pk=response.data["id"])
         self.product.refresh_from_db()
-        self.assertEqual(order.total, Decimal("1800.00"))
+        self.assertEqual(order.total, Decimal("2799.00"))
         self.assertEqual(order.discount_amount, Decimal("200.00"))
+        self.assertEqual(order.shipping_amount, Decimal("999.00"))
+        self.assertEqual(order.tax_amount, Decimal("274.58"))
         self.assertEqual(self.product.stock, 3)
         self.assertEqual(order.tracking_code, response.data["tracking_code"])
         self.assertTrue(CouponRedemption.objects.filter(coupon=coupon, user=self.user, order=order).exists())
@@ -80,6 +84,7 @@ class CommerceApiTests(TestCase):
         order = Order.objects.create(
             user=self.user, full_name="Test Shopper", email="shopper@example.com", phone="9876543210",
             address="10 Test Street", city="Mumbai", postal_code="400001", total=Decimal("1000.00"),
+            status="delivered",
         )
         OrderItem.objects.create(order=order, product=self.product, product_name=self.product.name, quantity=1, unit_price=self.product.price)
 
@@ -125,4 +130,32 @@ class CommerceApiTests(TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.data["products"], 1)
         self.assertEqual(result.data["users"], 1)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_contact_enquiry_is_saved_and_notified_when_email_is_available(self):
+        from django.core import mail
+
+        response = APIClient().post("/api/contact/", {
+            "name": "A Customer", "email": "customer@example.com", "phone": "9876543210",
+            "message": "I need help choosing a sofa for my living room.",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        enquiry = ContactMessage.objects.get()
+        self.assertEqual(enquiry.name, "A Customer")
+        self.assertTrue(enquiry.notification_sent)
+        self.assertEqual(len(mail.outbox), 1)
+
+    @patch("store.views.EmailMessage.send", side_effect=OSError("SMTP unavailable"))
+    def test_contact_enquiry_is_kept_in_admin_inbox_when_email_is_unavailable(self, _send_mail):
+        with self.assertLogs("store.views", level="ERROR"):
+            response = APIClient().post("/api/contact/", {
+                "name": "A Customer", "email": "customer@example.com",
+                "message": "I need help choosing a sofa for my living room.",
+            }, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        enquiry = ContactMessage.objects.get()
+        self.assertFalse(enquiry.notification_sent)
+        self.assertIn("saved for our support team", response.data["detail"])
 

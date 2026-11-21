@@ -3,19 +3,24 @@ from pathlib import Path
 from decimal import Decimal
 import dj_database_url
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-change-me-before-deployment")
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured("Set a strong SECRET_KEY in the backend environment when DEBUG is false.")
+    SECRET_KEY = "dev-only-change-me-before-deployment"
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if h.strip()]
 
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
-    "corsheaders", "rest_framework", "rest_framework_simplejwt",
+    "corsheaders", "rest_framework", "rest_framework_simplejwt", "storages",
     "store",
 ]
 MIDDLEWARE = [
@@ -58,10 +63,29 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_ROOT = BASE_DIR / "media"
-# The catalog photos committed with this project are bundled with static files
-# so WhiteNoise can serve them on Render, where Django's DEBUG-only media route
-# is disabled. User uploads should use durable object storage in production.
+MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", str(BASE_DIR / "media")))
+# Committed catalog photos are bundled for WhiteNoise. New uploads can use
+# durable S3-compatible storage when AWS_STORAGE_BUCKET_NAME is configured.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "").strip()
+if AWS_STORAGE_BUCKET_NAME:
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            "bucket_name": AWS_STORAGE_BUCKET_NAME,
+            "access_key": os.getenv("AWS_ACCESS_KEY_ID", "").strip() or None,
+            "secret_key": os.getenv("AWS_SECRET_ACCESS_KEY", "").strip() or None,
+            "region_name": os.getenv("AWS_S3_REGION_NAME", "").strip() or None,
+            "endpoint_url": os.getenv("AWS_S3_ENDPOINT_URL", "").strip() or None,
+            "custom_domain": os.getenv("AWS_S3_CUSTOM_DOMAIN", "").strip() or None,
+            "file_overwrite": False,
+            "querystring_auth": False,
+            "default_acl": None,
+        },
+    }
 if DEBUG:
     MEDIA_URL = "/media/"
 else:
@@ -79,6 +103,11 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
 EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").lower() == "true"
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", str(not DEBUG)).lower() == "true"
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000" if not DEBUG else "0"))
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", str(not DEBUG)).lower() == "true"
+CSRF_COOKIE_SECURE = os.getenv("CSRF_COOKIE_SECURE", str(not DEBUG)).lower() == "true"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()

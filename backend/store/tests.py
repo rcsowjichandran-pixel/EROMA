@@ -1,7 +1,8 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework.test import APIRequestFactory
@@ -10,6 +11,7 @@ from .models import Category, Product, ProductImage
 from .serializers import ProductSerializer
 
 
+@override_settings(SECURE_SSL_REDIRECT=False)
 class ProductModelTests(TestCase):
     def test_product_creation(self):
         c = Category.objects.create(name="Sofas", slug="sofas")
@@ -17,6 +19,7 @@ class ProductModelTests(TestCase):
         self.assertEqual(str(p), "Cloud Sofa")
 
 
+@override_settings(SECURE_SSL_REDIRECT=False)
 class StarterCatalogTests(TestCase):
     def test_seed_catalog_creates_nine_parents_and_fifteen_products_idempotently(self):
         call_command("seed_catalog", verbosity=0)
@@ -72,6 +75,7 @@ class StarterCatalogTests(TestCase):
         self.assertContains(change_response, "Modular Sofas")
 
 
+@override_settings(SECURE_SSL_REDIRECT=False)
 class ProductImageTests(TestCase):
     def test_primary_uploaded_image_is_exposed_as_product_image_url(self):
         category = Category.objects.create(name="Sofas", slug="sofas")
@@ -90,4 +94,7 @@ class ProductImageTests(TestCase):
         request = APIRequestFactory().get("/")
         data = ProductSerializer(product, context={"request": request}).data
 
-        self.assertTrue(data["image_url"].startswith("http://testserver/media/products/"))
+        self.assertEqual(
+            data["image_url"],
+            f"http://testserver{settings.MEDIA_URL}products/cloud-sofa.png",
+        )

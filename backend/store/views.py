@@ -17,13 +17,13 @@ from rest_framework.throttling import ScopedRateThrottle
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage, send_mail
 from django.db.models import Sum, Q, F, Avg, Count, Prefetch
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.contrib.auth.tokens import default_token_generator
-from .models import Address, CallbackRequest, Coupon, CouponRedemption, Product, ProductImage, ProductReview, Category, HomepageBanner, Order, OrderItem, UserProfile, WishlistItem, StoreLocation, Offer, FooterPageContent, SiteBranding
+from .models import Address, CallbackRequest, ContactMessage, Coupon, CouponRedemption, Product, ProductImage, ProductReview, Category, HomepageBanner, Order, OrderItem, UserProfile, WishlistItem, StoreLocation, Offer, FooterPageContent, SiteBranding
 from .serializers import AddressSerializer, RegisterSerializer, ProductSerializer, ProductImageSerializer, CategorySerializer, HomepageBannerSerializer, OrderSerializer, CreateOrderSerializer, ProductReviewSerializer, UserProfileSerializer, WishlistItemSerializer, OrderLineInputSerializer, StoreLocationSerializer, OfferBannerSerializer, FooterPageContentSerializer, SiteBrandingSerializer, coupon_category_ids
 from .permissions import IsStaffOrReadOnly
 
@@ -793,20 +793,24 @@ class ContactMessageView(APIView):
             validate_email(email)
         except Exception:
             return Response({"detail": "Enter a valid email address."}, status=400)
+        enquiry = ContactMessage.objects.create(name=name, email=email, phone=phone, message=message)
         body = f"Name: {name}\nEmail: {email}\nPhone: {phone or 'Not provided'}\n\nMessage:\n{message}"
         try:
-            send_mail(
+            EmailMessage(
                 subject=f"EROMA website enquiry from {name}",
-                message=body,
+                body=body,
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=["hello@eroma.in"],
-                fail_silently=False,
+                to=["hello@eroma.in"],
                 reply_to=[email],
-            )
+            ).send(fail_silently=False)
+            enquiry.notification_sent = True
+            enquiry.save(update_fields=("notification_sent",))
         except Exception:
             logger.exception("Unable to deliver EROMA contact enquiry")
-            return Response({"detail": "We couldn’t send your message right now. Please email hello@eroma.in."}, status=503)
-        return Response({"detail": "Thanks for contacting EROMA. Your message has been sent to our support team."}, status=201)
+        return Response({
+            "detail": "Thanks for contacting EROMA. Your enquiry has been saved for our support team."
+            if not enquiry.notification_sent else "Thanks for contacting EROMA. Your enquiry has been sent to our support team."
+        }, status=201)
 
 
 class CallbackRequestView(APIView):
@@ -844,18 +848,17 @@ class CallbackRequestView(APIView):
             message=message,
         )
         try:
-            send_mail(
+            EmailMessage(
                 subject=f"EROMA callback request #{callback.pk} from {name}",
-                message=(
+                body=(
                     f"Name: {name}\nEmail: {email}\nPhone: {phone}\n"
                     f"PIN code: {postal_code}\nCity: {city or 'Not provided'}\n\n"
                     f"Message:\n{message}"
                 ),
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=["hello@eroma.in"],
-                fail_silently=False,
+                to=["hello@eroma.in"],
                 reply_to=[email],
-            )
+            ).send(fail_silently=False)
         except Exception:
             logger.exception("Callback request %s was saved but its notification email failed", callback.pk)
 

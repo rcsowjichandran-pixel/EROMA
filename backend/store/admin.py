@@ -10,6 +10,7 @@ from .models import (
     CategoryImage,
     Address,
     CallbackRequest,
+    ContactMessage,
     Coupon,
     CouponRedemption,
     FooterPageContent,
@@ -94,6 +95,16 @@ class CallbackRequestAdmin(admin.ModelAdmin):
     search_fields = ("name", "email", "phone", "city", "postal_code", "message")
     list_editable = ("status",)
     readonly_fields = ("created_at",)
+    ordering = ("-created_at",)
+
+
+@admin.register(ContactMessage, site=admin_site)
+class ContactMessageAdmin(admin.ModelAdmin):
+    list_display = ("name", "email", "phone", "status", "notification_sent", "created_at")
+    list_filter = ("status", "notification_sent", "created_at")
+    search_fields = ("name", "email", "phone", "message")
+    list_editable = ("status",)
+    readonly_fields = ("created_at", "notification_sent")
     ordering = ("-created_at",)
 
 

@@ -77,10 +77,12 @@ class Product(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
+        if self.price not in (None, ""):
+            self.price = Decimal(str(self.price))
+        if self.regular_price not in (None, ""):
+            self.regular_price = Decimal(str(self.regular_price))
         if self.price and not self.regular_price:
-            promo_key = self.sku or self.slug or self.name
-            discount_percent = 10 + sum(ord(character) for character in promo_key) % 21
-            self.regular_price = (self.price * Decimal("100") / Decimal(100 - discount_percent)).quantize(
+            self.regular_price = (self.price * Decimal("1.10")).quantize(
                 Decimal("1"), rounding=ROUND_HALF_UP
             )
         super().save(*args, **kwargs)
@@ -408,3 +410,21 @@ class CallbackRequest(models.Model):
 
     def __str__(self):
         return f"Callback request from {self.name} ({self.phone})"
+
+
+class ContactMessage(models.Model):
+    STATUS_CHOICES = [("new", "New"), ("reviewed", "Reviewed"), ("closed", "Closed")]
+
+    name = models.CharField(max_length=120)
+    email = models.EmailField()
+    phone = models.CharField(max_length=40, blank=True)
+    message = models.TextField(max_length=4000)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="new")
+    notification_sent = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"Website enquiry from {self.name} ({self.created_at:%Y-%m-%d})"

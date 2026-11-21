@@ -234,8 +234,7 @@ class Command(BaseCommand):
 
         for item in PRODUCTS:
             sale_price = Decimal(item["price"])
-            discount_percent = 10 + sum(ord(character) for character in item["sku"]) % 21
-            regular_price = (sale_price * Decimal("100") / Decimal(100 - discount_percent)).quantize(
+            regular_price = (sale_price * Decimal("1.10")).quantize(
                 Decimal("1"), rounding=ROUND_HALF_UP
             )
             defaults = {

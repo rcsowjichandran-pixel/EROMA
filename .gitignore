@@ -35,6 +35,9 @@ backend/db.sqlite3
 backend/db-local-backup.sqlite3
 backend/eroma-local-catalog.json
 backend/render-catalog-before.json
+/eroma-catalog.json
+*.dump
+*.backup
 *.log
 
 # Operating system files
