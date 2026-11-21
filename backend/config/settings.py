@@ -56,10 +56,17 @@ LANGUAGE_CODE = "en-in"
 TIME_ZONE = "Asia/Kolkata"
 USE_I18N = True
 USE_TZ = True
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+# The catalog photos committed with this project are bundled with static files
+# so WhiteNoise can serve them on Render, where Django's DEBUG-only media route
+# is disabled. User uploads should use durable object storage in production.
+if DEBUG:
+    MEDIA_URL = "/media/"
+else:
+    MEDIA_URL = f"{STATIC_URL.rstrip('/')}/media/"
+    STATICFILES_DIRS = [("media", MEDIA_ROOT)]
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@eroma.in")
 EMAIL_BACKEND = os.getenv(
