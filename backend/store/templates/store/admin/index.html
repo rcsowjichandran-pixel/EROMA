@@ -1,0 +1,27 @@
+{% extends "admin/index.html" %}
+{% load static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'store/admin.css' %}">
+{% endblock %}
+
+{% block content %}
+  <section class="studio-dashboard" aria-label="EROMA store overview">
+    <div class="studio-heading">
+      <span class="studio-eyebrow">EROMA · ADMIN STUDIO</span>
+      <h1>Live beautifully.</h1>
+      <p>Store overview and day-to-day management.</p>
+    </div>
+    <div class="studio-metrics">
+      {% for metric in studio_metrics %}
+        <a class="studio-metric" href="{{ metric.url }}">
+          <span>{{ metric.label }}</span>
+          <strong>{{ metric.value }}</strong>
+          <small>{{ metric.detail }}</small>
+        </a>
+      {% endfor %}
+    </div>
+  </section>
+  {{ block.super }}
+{% endblock %}

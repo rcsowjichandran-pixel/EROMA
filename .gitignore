@@ -1,0 +1,39 @@
+# Local environment files and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+
+# Provider credentials belong in backend/.env, never in Vite/client variables.
+/backend/.env
+/backend/.env.*
+!/backend/.env.example
+/frontend/.env.local
+/frontend/.env.*.local
+
+# Private keys and credentials
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+service-account*.json
+
+# Dependencies and generated files
+node_modules/
+frontend/dist/
+backend/.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+backend/db.sqlite3
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
