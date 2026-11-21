@@ -389,3 +389,22 @@ class OrderItem(models.Model):
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     color = models.CharField(max_length=50, blank=True)
     def __str__(self): return f"{self.product_name} x {self.quantity}"
+
+
+class CallbackRequest(models.Model):
+    STATUS_CHOICES = [("new", "New"), ("contacted", "Contacted"), ("closed", "Closed")]
+
+    name = models.CharField(max_length=120)
+    email = models.EmailField()
+    phone = models.CharField(max_length=40)
+    postal_code = models.CharField(max_length=12)
+    city = models.CharField(max_length=100, blank=True)
+    message = models.TextField(max_length=2000)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="new")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"Callback request from {self.name} ({self.phone})"

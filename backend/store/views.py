@@ -23,7 +23,7 @@ from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.contrib.auth.tokens import default_token_generator
-from .models import Address, Coupon, CouponRedemption, Product, ProductImage, ProductReview, Category, HomepageBanner, Order, OrderItem, UserProfile, WishlistItem, StoreLocation, Offer, FooterPageContent, SiteBranding
+from .models import Address, CallbackRequest, Coupon, CouponRedemption, Product, ProductImage, ProductReview, Category, HomepageBanner, Order, OrderItem, UserProfile, WishlistItem, StoreLocation, Offer, FooterPageContent, SiteBranding
 from .serializers import AddressSerializer, RegisterSerializer, ProductSerializer, ProductImageSerializer, CategorySerializer, HomepageBannerSerializer, OrderSerializer, CreateOrderSerializer, ProductReviewSerializer, UserProfileSerializer, WishlistItemSerializer, OrderLineInputSerializer, StoreLocationSerializer, OfferBannerSerializer, FooterPageContentSerializer, SiteBrandingSerializer, coupon_category_ids
 from .permissions import IsStaffOrReadOnly
 
@@ -807,6 +807,62 @@ class ContactMessageView(APIView):
             logger.exception("Unable to deliver EROMA contact enquiry")
             return Response({"detail": "We couldn’t send your message right now. Please email hello@eroma.in."}, status=503)
         return Response({"detail": "Thanks for contacting EROMA. Your message has been sent to our support team."}, status=201)
+
+
+class CallbackRequestView(APIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "contact_message"
+
+    def post(self, request):
+        name = str(request.data.get("name", "")).strip()[:120]
+        email = str(request.data.get("email", "")).strip()[:254]
+        phone = str(request.data.get("phone", "")).strip()[:40]
+        postal_code = str(request.data.get("postal_code", "")).strip()[:12]
+        city = str(request.data.get("city", "")).strip()[:100]
+        message = str(request.data.get("message", "")).strip()[:2000]
+
+        if not all((name, email, phone, postal_code)) or len(message) < 5:
+            return Response(
+                {"detail": "Please provide your name, email, phone number, PIN code, and a short message."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            from django.core.validators import validate_email
+            validate_email(email)
+        except Exception:
+            return Response({"detail": "Enter a valid email address."}, status=status.HTTP_400_BAD_REQUEST)
+        if not re.fullmatch(r"\d{6}", postal_code):
+            return Response({"detail": "Enter a valid 6-digit PIN code."}, status=status.HTTP_400_BAD_REQUEST)
+
+        callback = CallbackRequest.objects.create(
+            name=name,
+            email=email,
+            phone=phone,
+            postal_code=postal_code,
+            city=city,
+            message=message,
+        )
+        try:
+            send_mail(
+                subject=f"EROMA callback request #{callback.pk} from {name}",
+                message=(
+                    f"Name: {name}\nEmail: {email}\nPhone: {phone}\n"
+                    f"PIN code: {postal_code}\nCity: {city or 'Not provided'}\n\n"
+                    f"Message:\n{message}"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=["hello@eroma.in"],
+                fail_silently=False,
+                reply_to=[email],
+            )
+        except Exception:
+            logger.exception("Callback request %s was saved but its notification email failed", callback.pk)
+
+        return Response(
+            {"detail": "Thanks. Your callback request has been received. EROMA support will contact you using the phone number provided."},
+            status=status.HTTP_201_CREATED,
+        )
 
 class MeView(APIView):
     permission_classes = [permissions.IsAuthenticated]

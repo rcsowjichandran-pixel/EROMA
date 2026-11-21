@@ -9,6 +9,7 @@ from .models import (
     Category,
     CategoryImage,
     Address,
+    CallbackRequest,
     Coupon,
     CouponRedemption,
     FooterPageContent,
@@ -84,6 +85,16 @@ class SofaLuxAdminSite(admin.AdminSite):
 admin_site = SofaLuxAdminSite(name="admin")
 admin_site.register(User, UserAdmin)
 admin_site.register(Group)
+
+
+@admin.register(CallbackRequest, site=admin_site)
+class CallbackRequestAdmin(admin.ModelAdmin):
+    list_display = ("name", "phone", "email", "city", "postal_code", "status", "created_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("name", "email", "phone", "city", "postal_code", "message")
+    list_editable = ("status",)
+    readonly_fields = ("created_at",)
+    ordering = ("-created_at",)
 
 
 @admin.register(FooterPageContent, site=admin_site)
