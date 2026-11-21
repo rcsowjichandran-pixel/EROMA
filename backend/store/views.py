@@ -541,7 +541,7 @@ class StoreChatView(APIView):
                 for message in messages
             ],
             "generationConfig": {
-                "maxOutputTokens": 320,
+                "maxOutputTokens": 700,
                 "thinkingConfig": {"thinkingLevel": "low"},
             },
         }
@@ -571,7 +571,7 @@ class StoreChatView(APIView):
                     logger.warning("Gemini model %s is unreachable; trying the configured fallback model (%s)", model_name, type(error).__name__)
                     time.sleep(0.3)
             parts = generated.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-            answer = next((part.get("text", "") for part in parts if part.get("text") and not part.get("thought")), "").strip()[:1200]
+            answer = next((part.get("text", "") for part in parts if part.get("text") and not part.get("thought")), "").strip()[:4000]
             return Response({"answer": answer or fallback, "source": "gemini" if answer else "store-help"})
         except urllib.error.HTTPError as error:
             logger.warning("Gemini chat request rejected: HTTP %s %s", error.code, error.reason)
