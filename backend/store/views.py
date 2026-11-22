@@ -423,6 +423,11 @@ class StoreChatView(APIView):
         }
 
     def post(self, request):
+        def chat_response(answer, source, provider_status):
+            response = Response({"answer": answer, "source": source})
+            response["X-EROMA-Assistant-Status"] = provider_status
+            return response
+
         raw_messages = request.data.get("messages", [])
         if not isinstance(raw_messages, list):
             return Response({"detail": "Send chat messages as a list."}, status=status.HTTP_400_BAD_REQUEST)
@@ -572,7 +577,7 @@ class StoreChatView(APIView):
         if support_reply:
             fallback = support_reply
         if not settings.GEMINI_API_KEY:
-            return Response({"answer": fallback, "source": "store-help"})
+            return chat_response(fallback, "store-help", "gemini-key-missing")
 
         instructions = (
             "You are Eri, EROMA's friendly, lively furniture guide. Answer the customer's actual question directly and naturally, using earlier turns for follow-ups. "
@@ -630,16 +635,20 @@ class StoreChatView(APIView):
                     time.sleep(0.3)
             parts = generated.get("candidates", [{}])[0].get("content", {}).get("parts", [])
             answer = next((part.get("text", "") for part in parts if part.get("text") and not part.get("thought")), "").strip()[:4000]
-            return Response({"answer": answer or fallback, "source": "gemini" if answer else "store-help"})
+            return chat_response(
+                answer or fallback,
+                "gemini" if answer else "store-help",
+                f"gemini-{model_name}" if answer else "gemini-empty-response",
+            )
         except urllib.error.HTTPError as error:
             logger.warning("Gemini chat request rejected: HTTP %s %s", error.code, error.reason)
-            return Response({"answer": fallback, "source": "store-help"})
+            return chat_response(fallback, "store-help", f"gemini-http-{error.code}")
         except urllib.error.URLError as error:
             logger.warning("Gemini chat connection failed: %s", error.reason)
-            return Response({"answer": fallback, "source": "store-help"})
+            return chat_response(fallback, "store-help", "gemini-connection-error")
         except (TimeoutError, ValueError, KeyError, IndexError, TypeError) as error:
             logger.warning("Gemini chat response could not be read: %s", type(error).__name__)
-            return Response({"answer": fallback, "source": "store-help"})
+            return chat_response(fallback, "store-help", f"gemini-{type(error).__name__.lower()}")
 
 
 def _razorpay_request(method, path, payload=None, *, idempotency_key=None):

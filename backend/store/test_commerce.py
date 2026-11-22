@@ -387,6 +387,7 @@ class CommerceApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["source"], "store-help")
+        self.assertEqual(response["X-EROMA-Assistant-Status"], "gemini-key-missing")
         self.assertIn("everyday comfort", response.data["answer"])
         self.assertIn("choose cushioned", response.data["answer"])
         self.assertNotIn("Here are a few available options", response.data["answer"])
