@@ -379,6 +379,18 @@ class CommerceApiTests(TestCase):
         self.assertEqual(result.data["products"], 1)
         self.assertEqual(result.data["users"], 1)
 
+    @override_settings(GEMINI_API_KEY="")
+    def test_store_assistant_compares_wooden_and_cushioned_sofas_without_ai(self):
+        response = APIClient().post("/api/assistant/chat/", {
+            "messages": [{"role": "user", "text": "Which will you suggest, wooden or cushion sofa?"}],
+        }, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["source"], "store-help")
+        self.assertIn("everyday comfort", response.data["answer"])
+        self.assertIn("choose cushioned", response.data["answer"])
+        self.assertNotIn("Here are a few available options", response.data["answer"])
+
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_contact_enquiry_is_saved_and_notified_when_email_is_available(self):
         from django.core import mail

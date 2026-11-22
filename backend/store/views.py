@@ -442,6 +442,11 @@ class StoreChatView(APIView):
             and any(word in latest for word in ("difference", "different", "compare", "versus", " vs ", "better"))
             and any(word in latest for word in ("sofa", "sofas", "couch"))
         )
+        sofa_build_comparison = (
+            any(word in latest for word in ("wood", "wooden"))
+            and any(word in latest for word in ("cushion", "cushioned", "upholstered"))
+            and any(word in latest for word in ("sofa", "sofas", "couch"))
+        )
         care_question = any(word in latest for word in ("clean", "cleaning", "care", "maintain", "maintenance", "remove stain"))
         recommendation_intent = any(phrase in latest for phrase in (
             "recommend", "suggest", "show me", "find me", "looking for", "available options", "browse", "shop for", "do you have", "in stock"
@@ -469,7 +474,13 @@ class StoreChatView(APIView):
             if any(word in latest for word in ("coupon", "offer", "discount")) else
             "I’m here to help you find the right piece. What room are you furnishing, and what style or budget do you have in mind?"
         )
-        if material_comparison:
+        if sofa_build_comparison:
+            fallback = (
+                "For everyday comfort, I would usually suggest a cushioned or upholstered sofa. It gives softer back and seat support and is better suited to relaxing for longer periods. "
+                "A wooden sofa is a good choice when you prefer a firm seat, visible natural wood, easier surface cleaning, or a traditional look. "
+                "For a living room used daily, choose cushioned; for a formal room or a firmer low-maintenance style, choose wooden. Tell me your room size and budget and I can narrow the EROMA options."
+            )
+        elif material_comparison:
             fallback = (
                 "Leather sofas have a smooth, structured look and are usually quick to wipe clean. Fabric sofas come in more textures and colours and often feel softer. "
                 "Care and durability depend on the specific upholstery, so check each product's material and care details. Would you like me to find EROMA sofas in either material or within a budget?"
@@ -524,7 +535,7 @@ class StoreChatView(APIView):
                     "Use cushions or bedding to echo the wall colour, and compare fabric samples against the wall in daylight. "
                     "What shade are your walls? I can suggest a more specific pairing."
                 )
-        elif matched_terms and recommendation_intent and not material_comparison and not care_question:
+        elif matched_terms and recommendation_intent and not sofa_build_comparison and not material_comparison and not care_question:
             matches = Product.objects.filter(status="active", stock__gt=0).filter(
                 Q(category__name__icontains=matched_terms[0]) | Q(name__icontains=matched_terms[0])
             ).order_by("-featured", "-best_seller", "name")[:3]
@@ -586,14 +597,15 @@ class StoreChatView(APIView):
                 {"role": "user" if message["role"] == "user" else "model", "parts": [{"text": message["text"]}]}
                 for message in messages
             ],
-            "generationConfig": {
-                "maxOutputTokens": 700,
-                "thinkingConfig": {"thinkingLevel": "low"},
-            },
+            "generationConfig": {"maxOutputTokens": 700},
         }
         try:
             generated = None
-            model_names = list(dict.fromkeys((settings.GEMINI_MODEL, settings.GEMINI_FALLBACK_MODEL)))
+            model_names = list(dict.fromkeys((
+                settings.GEMINI_MODEL,
+                settings.GEMINI_FALLBACK_MODEL,
+                "gemini-flash-latest",
+            )))
             for model_index, model_name in enumerate(model_names):
                 gemini_request = urllib.request.Request(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
