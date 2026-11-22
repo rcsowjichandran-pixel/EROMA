@@ -1,3 +1,4 @@
+import csv
 import json
 import base64
 import hashlib
@@ -21,7 +22,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.mail import EmailMessage, get_connection, send_mail
 from django.db import transaction
 from django.db.models import Sum, Q, F, Avg, Count, Max, Prefetch
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
@@ -1207,6 +1208,30 @@ class AdminStatsView(APIView):
             "sales": confirmed_orders.aggregate(total=Sum("total"))["total"] or 0,
             "low_stock": Product.objects.filter(stock__lte=5, status="active").count(),
         })
+
+
+class AdminSalesReportView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="EROMA-sales-report.csv"'
+        response["Cache-Control"] = "private, no-store"
+        writer = csv.writer(response)
+        writer.writerow(["Order ID", "Order date (India)", "Order status", "Payment method",
+                         "Payment status", "Discount (INR)", "Delivery (INR)", "GST included (INR)", "Total (INR)"])
+        order_statuses = dict(Order.STATUS_CHOICES)
+        payment_methods = dict(Order.PAYMENT_CHOICES)
+        payment_statuses = dict(Order.PAYMENT_STATUS_CHOICES)
+        for order in Order.objects.confirmed().order_by("-created_at", "-pk").iterator():
+            writer.writerow([
+                order.pk, timezone.localdate(order.created_at).isoformat(),
+                order_statuses.get(order.status, "Unknown"),
+                payment_methods.get(order.payment_method, "Unknown"),
+                payment_statuses.get(order.payment_status, "Unknown"),
+                order.discount_amount, order.shipping_amount, order.tax_amount, order.total,
+            ])
+        return response
 
 
 class PasswordResetRequestView(APIView):

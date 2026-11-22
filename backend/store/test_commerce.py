@@ -1,3 +1,4 @@
+import csv
 from decimal import Decimal
 from io import BytesIO
 from unittest.mock import patch
@@ -345,6 +346,27 @@ class CommerceApiTests(TestCase):
             rejected = guest.post("/api/auth/password-reset/", {"email": self.user.email}, format="json")
         self.assertEqual(rejected.status_code, 503)
         self.assertNotIn("development_reset_link", rejected.data)
+
+    def test_sales_csv_is_staff_only_and_exports_confirmed_orders_without_customer_details(self):
+        placed = self.client.post("/api/orders/", self.order_payload(), format="json")
+        self.assertEqual(placed.status_code, 201, placed.data)
+        cancelled = self.client.post("/api/orders/", self.order_payload(), format="json")
+        self.assertEqual(cancelled.status_code, 201, cancelled.data)
+        Order.objects.filter(pk=cancelled.data["id"]).update(status="cancelled")
+
+        url = "/api/admin/sales-report/"
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Disposition"], 'attachment; filename="EROMA-sales-report.csv"')
+        report = response.content.decode("utf-8")
+        rows = list(csv.DictReader(report.splitlines()))
+        self.assertEqual([row["Order ID"] for row in rows], [str(placed.data["id"])])
+        self.assertEqual(rows[0]["Total (INR)"], placed.data["total"])
+        self.assertNotIn(self.user.email, report)
+        self.assertNotIn(placed.data["address"], report)
 
     def test_admin_metrics_are_staff_only_and_report_live_catalog(self):
         denied = self.client.get("/api/admin/stats/")

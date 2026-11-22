@@ -1,5 +1,6 @@
 from rest_framework.routers import DefaultRouter
 from django.urls import path, include
+from .views import AdminSalesReportView
 from .views import ProductViewSet, CategoryViewSet, HomepageBannerViewSet, OrderViewSet, OrderTrackingLookupView, ContactMessageView, CallbackRequestView, MeView, ProfileView, AddressViewSet, WishlistViewSet, ProductReviewViewSet, CouponValidationView, AvailableCouponsView, AdminStatsView, ProductRecommendationView, StoreLocationViewSet, OfferBannerViewSet, FooterPageContentViewSet, StoreChatView, RazorpayConfigView, RazorpayCreateOrderView, RazorpayVerifyView, RazorpayCancelView, SiteBrandingView
 router = DefaultRouter()
 router.register("products", ProductViewSet, basename="product")
@@ -23,6 +24,7 @@ urlpatterns = [
     path("coupons/validate/", CouponValidationView.as_view()),
     path("coupons/available/", AvailableCouponsView.as_view()),
     path("admin/stats/", AdminStatsView.as_view()),
+    path("admin/sales-report/", AdminSalesReportView.as_view()),
     path("recommendations/", ProductRecommendationView.as_view()),
     path("assistant/chat/", StoreChatView.as_view()),
     path("payments/razorpay/config/", RazorpayConfigView.as_view()),

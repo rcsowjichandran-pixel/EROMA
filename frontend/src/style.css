@@ -317,6 +317,10 @@ main.content .pagehead p{color:#62564b!important}
 .order-actions{display:grid;gap:8px;justify-items:start}
 .order-actions small{display:block;margin-top:4px}
 .checkout-delivery-estimate{display:grid;gap:4px;margin:12px 0;padding:12px;background:#f7f2eb;border:1px solid #e2d5c7;border-radius:6px;color:#30251e}
+.product-fit-guide{padding:16px 20px;background:#fff9f1;border:1px solid #e2d5c7;border-radius:8px;color:#30251e}
+.product-fit-guide summary{font-weight:700;cursor:pointer}
+.product-fit-guide p{margin:12px 0}
+.product-fit-guide ol{margin:8px 0 0;padding-inline-start:22px;line-height:1.6}
 @media(max-width:700px){.order-actions{grid-column:1/-1}}
 .ordercard .status{justify-self:start;padding:7px 11px;border:1px solid #c7d3bd;border-radius:18px;background:#edf3e9!important;color:#385331!important;font-size:11px;font-weight:700;white-space:nowrap}
 .ordercard select{min-height:38px;padding:7px 10px;border:1px solid #cdbba9;border-radius:5px;background:#fffdf9;color:#3d3026}
