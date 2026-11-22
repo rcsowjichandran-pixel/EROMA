@@ -1,10 +1,11 @@
 from io import BytesIO
+from pathlib import Path
 from xml.sax.saxutils import escape
 
 from django.utils import timezone
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
 def render_order_bill(order):
@@ -42,8 +43,10 @@ def render_order_bill(order):
         ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("LINEBELOW", (0, 0), (-1, -1), 0.35, colors.lightgrey),
     ]))
+    logo = Image(str(Path(__file__).with_name("eroma-bill-logo.png")), width=150, height=80, kind="proportional")
+    logo.hAlign = "LEFT"
     document.build([
-        Paragraph("EROMA", styles["Title"]),
+        logo,
         Paragraph(f"Order bill #{order.pk}", styles["Heading2"]),
         paragraph(f"Order date: {timezone.localtime(order.created_at):%d %b %Y}"),
         Paragraph("Customer and delivery address", styles["Heading3"]),

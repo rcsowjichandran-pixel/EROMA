@@ -83,7 +83,9 @@ class CommerceApiTests(TestCase):
         self.assertEqual(bill.status_code, 200)
         self.assertEqual(bill["Content-Type"], "application/pdf")
         self.assertEqual(bill["Content-Disposition"], f'attachment; filename="EROMA-bill-{order_id}.pdf"')
-        self.assertTrue(b"".join(bill.streaming_content).startswith(b"%PDF-"))
+        pdf = b"".join(bill.streaming_content)
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+        self.assertIn(b"/Subtype /Image", pdf)
 
         other = APIClient()
         other.force_authenticate(User.objects.create_user("other-shopper"))
@@ -148,6 +150,32 @@ class CommerceApiTests(TestCase):
         self.assertEqual(captured.data["order"]["payment_status"], "paid")
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 3)
+
+    @override_settings(RAZORPAY_KEY_ID="test-id", RAZORPAY_KEY_SECRET="test-secret")
+    @patch("store.views._razorpay_request")
+    def test_emi_checkout_refunds_a_captured_non_emi_charge_and_releases_stock_once(self, gateway):
+        payment = {"id": "pay_card", "order_id": "order_emi", "amount": 299900,
+                   "currency": "INR", "method": "card", "status": "captured"}
+        gateway.side_effect = [
+            {"id": "order_emi", "amount": 299900, "currency": "INR"},
+            {"items": [payment]},
+            {"id": "refund_card", "payment_id": "pay_card", "amount": 299900, "status": "processed"},
+        ]
+        started = self.client.post("/api/payments/razorpay/create-order/", self.order_payload(emi_requested=True), format="json")
+        self.assertEqual(started.status_code, 200, started.data)
+        order_id = started.data["order_id"]
+        for _ in range(2):
+            result = self.client.post("/api/payments/razorpay/cancel/", {"order_id": order_id}, format="json")
+            self.assertEqual(result.data, {"cancelled": True, "refunded": True})
+        gateway.assert_called_with("POST", "payments/pay_card/refund", {"amount": 299900},
+                                   idempotency_key="eroma-emi-mismatch-pay_card")
+        self.assertEqual(gateway.call_count, 3)
+        order = Order.objects.get(pk=order_id)
+        self.assertEqual((order.payment_status, order.status, order.razorpay_payment_id),
+                         ("refunded", "cancelled", "pay_card"))
+        self.assertFalse(order.bill_available)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
 
     def test_invalid_coupon_rolls_back_stock_deduction(self):
         response = self.client.post("/api/orders/", self.order_payload(coupon_code="NOPE"), format="json")

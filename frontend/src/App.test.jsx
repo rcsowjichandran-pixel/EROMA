@@ -217,7 +217,10 @@ describe('storefront flows', () => {
     expect(screen.getByText('6 available')).toBeInTheDocument()
   })
 
-  it('keeps the bag and reports a verified payment failure when Razorpay checkout fails', async () => {
+  it.each([
+    ['razorpay', 'Pay securely with Razorpay', 'Payment failed'],
+    ['razorpay_emi', 'Continue to card EMI', 'Card EMI payment failed'],
+  ])('keeps the bag and reports a verified failure for %s', async (method, buttonLabel, failure) => {
     localStorage.setItem('sofalux_access', 'test-token')
     localStorage.setItem('eroma_cart_user_1', JSON.stringify([{...sofa, quantity: 1}]))
     const cancelPayment = vi.fn(() => ({cancelled: true}))
@@ -232,15 +235,22 @@ describe('storefront flows', () => {
     vi.stubGlobal('Razorpay', class {
       constructor(options) { this.options=options }
       on(event, handler) { if (event==='payment.failed') this.onFailure=handler }
-      open() { this.onFailure();this.options.modal.ondismiss() }
+      open() {
+        if (method==='razorpay_emi') {
+          expect(this.options.config.display.blocks.emi.instruments).toEqual([{method:'emi'}])
+          expect(this.options.config.display.preferences.show_default_blocks).toBe(false)
+        }
+        this.onFailure()
+        this.options.modal.ondismiss()
+      }
     })
     render(<App/>)
     fireEvent.click(await screen.findByRole('button', {name: 'Shopping bag: 1 items'}))
     await screen.findByDisplayValue('10 Test Street')
-    fireEvent.change(screen.getByLabelText('Payment method'), {target: {value: 'razorpay'}})
-    fireEvent.submit(screen.getByRole('button', {name: 'Pay securely with Razorpay'}).closest('form'))
+    fireEvent.change(screen.getByLabelText('Payment method'), {target: {value: method}})
+    fireEvent.submit(screen.getByRole('button', {name: buttonLabel}).closest('form'))
 
-    expect(await screen.findByText(/Payment failed\. Your order was not placed/)).toBeInTheDocument()
+    expect(await screen.findByText(`${failure}. Your order was not placed. You can try again from your bag.`)).toBeInTheDocument()
     expect(cancelPayment).toHaveBeenCalledOnce()
     expect(screen.getByRole('button', {name: 'Shopping bag: 1 items'})).toBeInTheDocument()
   })

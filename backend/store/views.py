@@ -629,19 +629,22 @@ class StoreChatView(APIView):
             return Response({"answer": fallback, "source": "store-help"})
 
 
-def _razorpay_request(method, path, payload=None):
+def _razorpay_request(method, path, payload=None, *, idempotency_key=None):
     credentials = base64.b64encode(f"{settings.RAZORPAY_KEY_ID}:{settings.RAZORPAY_KEY_SECRET}".encode()).decode()
+    headers = {"Authorization": f"Basic {credentials}", "Content-Type": "application/json"}
+    if idempotency_key:
+        headers["X-Refund-Idempotency"] = idempotency_key
     request = urllib.request.Request(
         f"https://api.razorpay.com/v1/{path.lstrip('/')}",
         data=json.dumps(payload).encode() if payload is not None else None,
-        headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/json"},
+        headers=headers,
         method=method,
     )
     with urllib.request.urlopen(request, timeout=15) as response:
         return json.loads(response.read().decode())
 
 
-def _release_razorpay_order(order_id, user):
+def _release_razorpay_order(order_id, user, *, refunded_payment=None):
     with transaction.atomic():
         try:
             order = Order.objects.select_for_update().get(pk=order_id, user=user, payment_method="razorpay")
@@ -654,7 +657,13 @@ def _release_razorpay_order(order_id, user):
         CouponRedemption.objects.filter(order=order).delete()
         order.payment_status = "failed"
         order.status = "cancelled"
-        order.save(update_fields=["payment_status", "status"])
+        fields = ["payment_status", "status"]
+        if refunded_payment:
+            order.payment_status = "refunded"
+            order.razorpay_payment_id = refunded_payment["id"]
+            order.payment_instrument = str(refunded_payment.get("method", ""))[:20]
+            fields += ["razorpay_payment_id", "payment_instrument"]
+        order.save(update_fields=fields)
         return True
 
 
@@ -663,6 +672,21 @@ def _matches_razorpay_payment(order, payment):
         payment.get("order_id") == order.razorpay_order_id
         and payment.get("amount") == int(order.total * 100)
         and payment.get("currency") == "INR"
+    )
+
+
+def _refund_non_emi_payment(payment):
+    payment_id = payment["id"]
+    refund = _razorpay_request(
+        "POST", f"payments/{payment_id}/refund", {"amount": payment["amount"]},
+        idempotency_key=f"eroma-emi-mismatch-{payment_id}",
+    )
+    if refund.get("status") == "pending" and refund.get("id"):
+        refund = _razorpay_request("GET", f"payments/{payment_id}/refunds/{refund['id']}")
+    return (
+        refund.get("status") == "processed"
+        and refund.get("payment_id") == payment_id
+        and refund.get("amount") == payment["amount"]
     )
 
 
@@ -754,7 +778,8 @@ class RazorpayVerifyView(APIView):
                 payment = _razorpay_request("POST", f"payments/{payment_id}/capture", {"amount": expected_amount, "currency": "INR"})
         except (urllib.error.URLError, TimeoutError, ValueError):
             return Response({"detail": "Payment was received, but its status could not be confirmed. Please contact support before retrying."}, status=503)
-        if not _matches_razorpay_payment(order, payment) or payment.get("status") != "captured":
+        if (not _matches_razorpay_payment(order, payment) or payment.get("status") != "captured"
+                or (order.emi_requested and payment.get("method") != "emi")):
             return Response({"detail": "Razorpay has not confirmed a captured payment for this order."}, status=400)
         _mark_razorpay_paid(order, payment_id, payment)
         return Response(OrderSerializer(order).data)
@@ -771,10 +796,11 @@ class RazorpayCancelView(APIView):
             return Response({"detail": "Payment attempt not found."}, status=404)
         if order.payment_status == "paid":
             return Response({"cancelled": False, "order": OrderSerializer(order).data})
-        if order.payment_status == "failed":
-            return Response({"cancelled": True})
+        if order.payment_status in ("failed", "refunded"):
+            return Response({"cancelled": True, "refunded": True} if order.payment_status == "refunded" else {"cancelled": True})
         if order.payment_status != "pending":
             return Response({"cancelled": False})
+        refunded_payment = None
         if order.razorpay_order_id:
             try:
                 payments = _razorpay_request("GET", f"orders/{order.razorpay_order_id}/payments")["items"]
@@ -783,14 +809,42 @@ class RazorpayCancelView(APIView):
             except (urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError):
                 return Response({"detail": "Payment status could not be checked. Please contact support before retrying."}, status=503)
             for payment in payments:
-                if (payment.get("status") == "captured" and payment.get("id") and _matches_razorpay_payment(order, payment)
+                payment_id = payment.get("id")
+                if not payment_id or not _matches_razorpay_payment(order, payment):
+                    continue
+                if order.emi_requested and payment.get("method") != "emi":
+                    continue
+                if order.emi_requested and payment.get("status") == "authorized":
+                    try:
+                        payment = _razorpay_request(
+                            "POST", f"payments/{payment_id}/capture",
+                            {"amount": int(order.total * 100), "currency": "INR"},
+                        )
+                    except (urllib.error.URLError, TimeoutError, ValueError):
+                        return Response({"detail": "The EMI payment is still being checked."}, status=503)
+                if (payment.get("status") == "captured" and _matches_razorpay_payment(order, payment)
                         and (not order.emi_requested or payment.get("method") == "emi")):
-                    _mark_razorpay_paid(order, payment["id"], payment)
+                    _mark_razorpay_paid(order, payment_id, payment)
                     return Response({"cancelled": False, "order": OrderSerializer(order).data})
-            if any(payment.get("status") not in ("failed", "refunded") for payment in payments):
+            for payment in payments:
+                payment_status = payment.get("status")
+                if payment_status == "failed":
+                    continue
+                if payment_status == "refunded":
+                    if payment.get("id") and _matches_razorpay_payment(order, payment):
+                        refunded_payment = payment
+                    continue
+                if (order.emi_requested and payment_status == "captured" and payment.get("method") != "emi"
+                        and payment.get("id") and _matches_razorpay_payment(order, payment)):
+                    try:
+                        if _refund_non_emi_payment(payment):
+                            refunded_payment = payment
+                            continue
+                    except (urllib.error.URLError, TimeoutError, ValueError, TypeError, AttributeError):
+                        logger.warning("Could not confirm non-EMI refund for order %s", order.pk, exc_info=True)
                 return Response({"detail": "A payment is still being checked. Please contact support before retrying."}, status=409)
-        if _release_razorpay_order(order.id, request.user):
-            return Response({"cancelled": True})
+        if _release_razorpay_order(order.id, request.user, refunded_payment=refunded_payment):
+            return Response({"cancelled": True, "refunded": True} if refunded_payment else {"cancelled": True})
         return Response({"cancelled": False})
 
 class OrderViewSet(viewsets.ModelViewSet):
