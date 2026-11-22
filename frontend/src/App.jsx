@@ -48,6 +48,38 @@ function productDiscountPercent({regular_price, price}) {
   return original > Number(price) ? Math.round((1 - Number(price) / original) * 100) : 0
 }
 
+function relatedCatalogProducts(product, products, categories) {
+  if (!product) return []
+  const category = categories.find(item=>item.id===product.category)
+  const family = category && (category.parent || category.id)
+  const sameCollection = new Set(categories.filter(item=>family && (item.id===family || item.parent===family)).map(item=>item.id))
+  return products.filter(item=>item.id!==product.id && (
+    (product.category && item.category===product.category) || sameCollection.has(item.category)
+    || (product.category_name && item.category_name===product.category_name)
+  )).sort((a,b)=>Number(b.category===product.category)-Number(a.category===product.category)
+    || Number(b.stock>0)-Number(a.stock>0)
+    || Math.abs(Number(a.price)-Number(product.price))-Math.abs(Number(b.price)-Number(product.price))).slice(0,4)
+}
+
+function ProductDescription({product}) {
+  const description = product.description?.trim() || product.short_description?.trim()
+  const specifications = [
+    ['Material', product.material], ['Dimensions', product.dimensions], ['Fabric', product.fabric_type],
+    ['Frame material', product.frame_material], ['Cushion filling', product.cushion_filling],
+    ['Seats', product.seats], ['Weight', Number(product.weight_kg)>0 ? `${product.weight_kg} kg` : ''],
+    ['Warranty', product.warranty],
+  ].filter(([, value])=>typeof value==='string' ? value.trim() : Number(value)>0)
+
+  return <section className="product-description detail-section" aria-labelledby="product-description-title">
+    <div><h2 id="product-description-title">Product description</h2>
+      <p>{description || `${product.name}${product.category_name ? ` is part of our ${product.category_name} collection.` : ' is part of the EROMA collection.'}`}</p>
+    </div>
+    {specifications.length>0 && <div><h3>Specifications</h3><dl>
+      {specifications.map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+    </dl></div>}
+  </section>
+}
+
 export function ProductPhotoViewer({product, photo}) {
   const dialog = useRef(null)
   const [frame, setFrame] = useState(0)
@@ -82,7 +114,11 @@ export function ProductPhotoViewer({product, photo}) {
 
 export function ProductColourPreview({product, photo, colour, onChange}) {
   const [previewPhoto, setPreviewPhoto] = useState(null)
+  const [galleryPhoto, setGalleryPhoto] = useState(null)
   const options = productColorOptions(product)
+  const gallery = [...new Set([photo, ...(product.images || [])
+    .filter(shot=>!/^360\s*:|^colour\s*:/i.test(shot.alt_text?.trim()||''))
+    .map(shot=>shot.image)].filter(Boolean))]
   const showPreview = colour && previewPhoto === photo
   const variant = showPreview && product.images?.find(({image, alt_text}) =>
     image && alt_text?.trim().toLowerCase() === `colour: ${colour.toLowerCase()}`
@@ -101,10 +137,16 @@ export function ProductColourPreview({product, photo, colour, onChange}) {
           <img src={photo} alt=""/>
         </div>)}
       </div>
-    </div> : <img src={variant?.image || photo} alt={variant ? `${product.name} in ${colour}` : product.name}/>}
+    </div> : <img src={variant?.image || galleryPhoto || photo} alt={variant ? `${product.name} in ${colour}` : product.name}/>}
+    {gallery.length>1 && <div className="detail-photo-thumbnails" role="group" aria-label="Product photos">
+      {gallery.map((src,index)=><button type="button" key={src} aria-label={`Show product photo ${index+1}`}
+        aria-pressed={!showPreview && src===(galleryPhoto||photo)} onClick={()=>{setGalleryPhoto(src);setPreviewPhoto(null)}}>
+        <img src={src} alt=""/>
+      </button>)}
+    </div>}
     {(mask || variant) && <div className="sofa-photo-caption">
       {mask && <small>Approximate upholstery colour</small>}
-      <button type="button" onClick={() => setPreviewPhoto(null)}>Show original photo</button>
+      <button type="button" onClick={() => {setPreviewPhoto(null);setGalleryPhoto(null)}}>Show original photo</button>
     </div>}
     {options.length > 0 && <fieldset className="product-color-picker">
       <legend>Choose a colour <span aria-live="polite">{colour}</span></legend>
@@ -112,7 +154,7 @@ export function ProductColourPreview({product, photo, colour, onChange}) {
         style={{'--swatch-color': colorHex(option)}} aria-label={`Choose ${option}`} aria-pressed={colour === option}
         onClick={() => { onChange(option); setPreviewPhoto(photo) }}><i aria-hidden="true"/><span>{option}</span></button>)}</div>
     </fieldset>}
-    <ProductPhotoViewer key={product.id} product={product} photo={variant?.image || photo}/>
+    <ProductPhotoViewer key={product.id} product={product} photo={variant?.image || galleryPhoto || photo}/>
   </div>
 }
 const readCart = (storage,key) => { try{const items=JSON.parse(storage.getItem(key)||'[]');return Array.isArray(items)?items.map(item=>({...item,name:productTitle(item.name)})):[]}catch{return []} }
@@ -212,8 +254,9 @@ export default function App(){
   const [couponCode,setCouponCode]=useState(''), [couponQuote,setCouponQuote]=useState(null), [paymentMethod,setPaymentMethod]=useState('cod'), [razorpayConfig,setRazorpayConfig]=useState({enabled:false,key_id:'',gst_rate:18,free_delivery_threshold:50000,standard_delivery_fee:999})
   const [reviews,setReviews]=useState([]), [reviewForm,setReviewForm]=useState({rating:5,body:''}), [reviewEligibility,setReviewEligibility]=useState({productId:null,purchased:false,alreadyReviewed:false,loading:false}), [orderDetails,setOrderDetails]=useState({}), [adminStats,setAdminStats]=useState(null)
   const [cart,setCart]=useState(initialCart), [user,setUser]=useState(null)
-  const [page,setPage]=useState('home'), [selected,setSelected]=useState(null), [selectedColor,setSelectedColor]=useState(''), [navDropdownClosed,setNavDropdownClosed]=useState(false)
-  const previousPage=useRef('home')
+  const [page,updatePage]=useState('home'), [selected,setSelected]=useState(null), [selectedColor,setSelectedColor]=useState(''), [navDropdownClosed,setNavDropdownClosed]=useState(false)
+  const [selectedQuantity,setSelectedQuantity]=useState(1)
+  const pageHistory=useRef([])
   const [search,setSearch]=useState(''), [category,setCategory]=useState(''), [subcategory,setSubcategory]=useState('')
   const [modal,setModal]=useState(''), [error,setError]=useState(''), [busy,setBusy]=useState(false)
   const [orders,setOrders]=useState([]), [form,setForm]=useState({}), [productImage,setProductImage]=useState(null)
@@ -221,7 +264,7 @@ export default function App(){
   const [callbackOpen,setCallbackOpen]=useState(false), [callbackBusy,setCallbackBusy]=useState(false), [callbackError,setCallbackError]=useState(''), [callbackSent,setCallbackSent]=useState(false), [callbackForm,setCallbackForm]=useState({name:'',email:'',phone:'',postal_code:'',city:'',message:''})
   const [notice,setNotice]=useState(''), [footerInfoTitle,setFooterInfoTitle]=useState(''), [passwordResetMessage,setPasswordResetMessage]=useState('')
   const [searchHistory,setSearchHistory]=useState(()=>storedList('eroma_search_history')), [submittedSearch,setSubmittedSearch]=useState(''), [searchResults,setSearchResults]=useState(null), [recommendedProducts,setRecommendedProducts]=useState([]), [recommendationReason,setRecommendationReason]=useState(''), [recommendationsLoading,setRecommendationsLoading]=useState(false)
-  const [couponChecking,setCouponChecking]=useState(false)
+  const [couponChecking,setCouponChecking]=useState(false), [couponError,setCouponError]=useState('')
   const couponRequest=useRef(0)
   const [searchLoading,setSearchLoading]=useState(false)
   const searchRequest=useRef(0)
@@ -248,7 +291,7 @@ export default function App(){
   useEffect(()=>{if(heroBanners.length<2||heroCarouselPaused||window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;const timer=window.setInterval(()=>setHeroIndex(i=>(i+1)%heroBanners.length),3500);return()=>window.clearInterval(timer)},[heroBanners.length,heroCarouselPaused])
   useEffect(()=>{saveCart(cart,user)},[cart,user])
   useEffect(()=>{window.scrollTo(0,0);load();api('/payments/razorpay/config/').then(setRazorpayConfig).catch(()=>{}); if(localStorage.getItem('sofalux_access')) api('/me/').then(me=>{setCart(cartForUser(me,[]));setUser(me);loadWishlist();loadProfile()}).catch(()=>{localStorage.removeItem('sofalux_access')});const reset=new URLSearchParams(window.location.search).get('reset');if(reset){const [uid,token]=reset.split('.');setForm({uid,token});setModal('reset');window.history.replaceState({},'',window.location.pathname)}},[])
-  useEffect(()=>{if(page!=='detail'){window.scrollTo({top:0,behavior:'smooth'});return}const frame=window.requestAnimationFrame(()=>{const productImage=document.querySelector('.detail > img');if(!productImage)return;const stickyNav=document.querySelector('header.nav');const navBottom=stickyNav?.getBoundingClientRect().bottom||0;const imageTop=productImage.getBoundingClientRect().top+window.scrollY;window.scrollTo({top:Math.max(0,imageTop-navBottom-12),behavior:'smooth'})});return()=>window.cancelAnimationFrame(frame)},[page])
+  useEffect(()=>{window.scrollTo({top:0,behavior:'smooth'})},[page,selected?.id])
   useEffect(()=>{if(page==='admin'&&isStaff){api('/admin/stats/').then(setAdminStats).catch(()=>{});loadStoreLocations()}},[page,isStaff])
   useEffect(()=>{if(page!=='orders'||!user)return;const now=new Date(),nextDay=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1);const timer=window.setTimeout(()=>loadOrders(),nextDay-now+1500);return()=>window.clearTimeout(timer)},[page,user])
   async function load(){const results=await Promise.allSettled([api('/products/'),api('/categories/'),api('/banners/',{cache:'no-store'}),api('/stores/'),api('/offers/'),api('/footer-content/'),api('/reviews/'),api('/branding/')]);if(results[0].status==='fulfilled')setProducts(results[0].value.map(product=>({...product,name:productTitle(product.name)})));else setError('Cannot connect to the product API. Check the backend and refresh.');if(results[1].status==='fulfilled')setCategories(results[1].value);if(results[2].status==='fulfilled'){setHeroBanners(results[2].value);setHeroIndex(i=>results[2].value.length?i%results[2].value.length:0)}if(results[3].status==='fulfilled')setStoreLocations(results[3].value);if(results[4].status==='fulfilled')setOffers(results[4].value);if(results[5].status==='fulfilled')setFooterPages(results[5].value);if(results[6].status==='fulfilled')setTestimonials(results[6].value);if(results[7].status==='fulfilled')setBranding(results[7].value);api('/coupons/available/').then(setAvailableCoupons).catch(()=>{})}
@@ -260,7 +303,7 @@ export default function App(){
   async function loadProfile(){try{const [p,a]=await Promise.all([api('/profile/'),api('/addresses/')]);setProfile(p);setAddresses(a);const saved=a.find(item=>item.is_default)||a[0];const profileName=[p.first_name,p.last_name].filter(Boolean).join(' ')||p.username||'';setForm(old=>({...old,full_name:old.full_name||saved?.full_name||profileName,email:old.email||p.email||'',phone:old.phone||savedContactValue('phone',saved?.phone)||savedContactValue('phone',p.phone),address:old.address||saved?.address||'',city:old.city||saved?.city||'',postal_code:old.postal_code||savedContactValue('postal_code',saved?.postal_code)}))}catch(e){setError(e.message)}}
   async function loadReviews(productId){try{setReviews(await api(`/reviews/?product=${productId}`))}catch(e){setReviews([])}}
   async function loadReviewEligibility(productId){if(!user){setReviewEligibility({productId,purchased:false,alreadyReviewed:false,loading:false});return}setReviewEligibility({productId,purchased:false,alreadyReviewed:false,loading:true});try{const result=await api(`/reviews/eligibility/?product=${productId}`);setReviewEligibility(current=>current.productId===productId?{productId,...result,loading:false}:current)}catch{setReviewEligibility(current=>current.productId===productId?{productId,purchased:false,alreadyReviewed:false,loading:false}:current)}}
-  function openProduct(product, colour){const cleanProduct={...product,name:productTitle(product.name)};setSelected(cleanProduct);const options=productColorOptions(cleanProduct);setSelectedColor(options.includes(colour)?colour:options[0]||'');setReviewForm({rating:5,body:''});loadReviewEligibility(product.id);const summary={id:product.id,name:cleanProduct.name,price:product.price,image_url:product.image_url,material:product.material,category_name:product.category_name,stock:product.stock,average_rating:product.average_rating,review_count:product.review_count,collective_rating:product.collective_rating,collective_review_count:product.collective_review_count,collective_is_sample:product.collective_is_sample};setRecentlyViewed(old=>{const next=[summary,...old.filter(item=>item.id!==product.id)].slice(0,8);localStorage.setItem('eroma_recently_viewed',JSON.stringify(next));return next});loadReviews(product.id);go('detail')}
+  function openProduct(product, colour){if(page==='detail'&&selected?.id!==product.id)rememberPage();setReviews([]);const cleanProduct={...product,name:productTitle(product.name)};setSelected(cleanProduct);setSelectedQuantity(1);const options=productColorOptions(cleanProduct);setSelectedColor(options.includes(colour)?colour:options[0]||'');setReviewForm({rating:5,body:''});loadReviewEligibility(product.id);const summary={id:product.id,name:cleanProduct.name,price:product.price,image_url:product.image_url,material:product.material,category_name:product.category_name,stock:product.stock,average_rating:product.average_rating,review_count:product.review_count,collective_rating:product.collective_rating,collective_review_count:product.collective_review_count,collective_is_sample:product.collective_is_sample};setRecentlyViewed(old=>{const next=[summary,...old.filter(item=>item.id!==product.id)].slice(0,8);localStorage.setItem('eroma_recently_viewed',JSON.stringify(next));return next});loadReviews(product.id);go('detail')}
   async function searchProducts(value=search) {
     const query = value.trim().replace(/\bdinning\b/gi, 'dining')
     const request = ++searchRequest.current
@@ -320,12 +363,55 @@ export default function App(){
   const deliveryThreshold=Number(razorpayConfig.free_delivery_threshold??50000)
   const deliveryFee=discountedSubtotal>=deliveryThreshold?0:Number(razorpayConfig.standard_delivery_fee??999)
   const payableTotal=discountedSubtotal+deliveryFee
-  function add(p,chosenColor=''){const color=chosenColor||productColorOptions(p)[0]||'',used=cart.filter(x=>x.id===p.id).reduce((sum,item)=>sum+item.quantity,0);if(used>=Number(p.stock||0))return;const existing=cart.find(x=>x.id===p.id&&(x.color||'')===color);const nextCart=existing?cart.map(x=>x===existing?{...x,quantity:x.quantity+1}:x):[...cart,{id:p.id,name:productTitle(p.name),price:Number(p.price),image_url:p.image_url,quantity:1,stock:p.stock,color}];setCart(nextCart);saveCart(nextCart,user);setNotice('Added to your bag');requestCouponQuote(couponCode,nextCart).catch(()=>{})}
-  function qty(id,n,color=''){const otherQuantity=cart.filter(x=>x.id===id&&(x.color||'')!==color).reduce((sum,item)=>sum+item.quantity,0);const nextCart=cart.map(x=>x.id===id&&(x.color||'')===color?{...x,quantity:n>0?Math.min(n,Math.max(0,x.stock-otherQuantity)):0}:x).filter(x=>x.quantity>0);setCart(nextCart);saveCart(nextCart,user);requestCouponQuote(couponCode,nextCart).catch(()=>{})}
+  function quantityInBag(product) {
+    return cart.filter(item=>item.id===product.id).reduce((total,item)=>total+item.quantity,0)
+  }
+  function availableQuantity(product) {
+    return Math.max(0, Number(product.stock||0) - quantityInBag(product))
+  }
+  function add(product, chosenColor='', quantity=1) {
+    const amount = Math.min(quantity, availableQuantity(product))
+    if (amount < 1) return false
+    const color = chosenColor||productColorOptions(product)[0]||''
+    const existing = cart.find(item=>item.id===product.id&&(item.color||'')===color)
+    const nextCart = existing
+      ? cart.map(item=>item===existing?{...item,quantity:item.quantity+amount}:item)
+      : [...cart,{id:product.id,name:productTitle(product.name),price:Number(product.price),image_url:product.image_url,quantity:amount,stock:product.stock,color}]
+    setCart(nextCart)
+    saveCart(nextCart,user)
+    setNotice('Added to your bag')
+    requestCouponQuote(couponCode,nextCart)
+    return true
+  }
+  function qty(id,n,color=''){const otherQuantity=cart.filter(x=>x.id===id&&(x.color||'')!==color).reduce((sum,item)=>sum+item.quantity,0);const nextCart=cart.map(x=>x.id===id&&(x.color||'')===color?{...x,quantity:n>0?Math.min(n,Math.max(0,x.stock-otherQuantity)):0}:x).filter(x=>x.quantity>0);setCart(nextCart);saveCart(nextCart,user);requestCouponQuote(couponCode,nextCart)}
   async function toggleWishlist(product){if(!user){setModal('login');setError('Sign in to save your wishlist.');return}setBusy(true);try{const saved=wishlistItems.find(x=>x.product.id===product.id);if(saved){await api(`/wishlist/${saved.id}/`,{method:'DELETE'});setWishlistItems(old=>old.filter(x=>x.id!==saved.id))}else{const item=await api('/wishlist/',{method:'POST',body:JSON.stringify({product_id:product.id})});setWishlistItems(old=>[item,...old])}}catch(e){setError(e.message)}finally{setBusy(false)}}
-  function go(p){if(p!==page)previousPage.current=page;setPage(p);setError('');if(p==='orders')loadOrders();if(user&&(p==='profile'||(p==='cart'&&page!=='cart')))loadProfile()}
+  function rememberPage() {
+    pageHistory.current.push({page, selected, selectedColor, selectedQuantity, footerInfoTitle,
+      category, subcategory, search, submittedSearch, searchResults, sort, priceRange, stockFilter, discountOnly})
+  }
+  function setPage(next, remember=true) {
+    if (next===page) return
+    if (remember) rememberPage()
+    updatePage(next)
+  }
+  function go(p, remember=true){setPage(p, remember);setError('');if(p==='orders')loadOrders();if(user&&(p==='profile'||(p==='cart'&&page!=='cart')))loadProfile()}
   function selectSubcategory(value){setSubcategory(value);setNavDropdownClosed(Boolean(value));window.setTimeout(()=>document.querySelector(value?'.subcategory-results-title':'.subcategory-cards')?.scrollIntoView({behavior:'smooth',block:'start'}),220)}
-  function backFromProduct(){go(previousPage.current&&previousPage.current!=='detail'?previousPage.current:'shop')}
+  function goBack() {
+    const previous = pageHistory.current.pop()
+    if (!previous) {go('home', false);return}
+    if (previous.page==='detail' && previous.selected) {
+      setSelected(previous.selected);setSelectedColor(previous.selectedColor);setSelectedQuantity(previous.selectedQuantity)
+      setReviews([]);loadReviews(previous.selected.id);loadReviewEligibility(previous.selected.id)
+    }
+    if (previous.page==='shop') {
+      ++searchRequest.current;setSearchLoading(false);setRecommendationsLoading(false)
+      setCategory(previous.category);setSubcategory(previous.subcategory);setSearch(previous.search)
+      setSubmittedSearch(previous.submittedSearch);setSearchResults(previous.searchResults)
+      setSort(previous.sort);setPriceRange(previous.priceRange);setStockFilter(previous.stockFilter);setDiscountOnly(previous.discountOnly)
+    }
+    if (previous.page==='footer-info') setFooterInfoTitle(previous.footerInfoTitle)
+    go(previous.page, false)
+  }
   async function openBagProduct(item) {
     try {
       const product = products.find(product => String(product.id) === String(item.id))
@@ -351,6 +437,7 @@ export default function App(){
   async function requestCouponQuote(code, items) {
     const request = ++couponRequest.current
     setCouponQuote(null)
+    setCouponError('')
     setCouponChecking(Boolean(code && items.length))
     if (!code || !items.length) return null
     try {
@@ -361,7 +448,7 @@ export default function App(){
       setCouponQuote(quote)
       return quote
     } catch (error) {
-      if (request === couponRequest.current) throw error
+      if (request === couponRequest.current) setCouponError(error.message)
       return null
     } finally {
       if (request === couponRequest.current) setCouponChecking(false)
@@ -370,16 +457,12 @@ export default function App(){
   async function applyCoupon(code=couponCode) {
     const selectedCode = String(code || '').trim()
     setCouponCode(selectedCode)
-    setError('')
-    if (selectedCode && !cart.length) {setError('Add an eligible product before applying the coupon.');return}
-    try {
-      const quote = await requestCouponQuote(selectedCode, cart)
-      if (quote) setNotice(`Coupon ${quote.code} applied. You saved ${money(quote.discount)}.`)
-    } catch (error) {
-      setError(error.message)
+    if (selectedCode && !cart.length) {
+      setCouponError('Add an eligible product before applying the coupon.')
+      return
     }
+    await requestCouponQuote(selectedCode, cart)
   }
-  async function copyCoupon(code){try{await navigator.clipboard.writeText(code);setNotice(`Coupon ${code} copied to clipboard.`)}catch{setNotice(`Coupon ${code} is shown in your order summary. You can copy it there.`)}}
   async function chooseOfferCoupon(card) {
     const code = card.coupon_code
     if (!code) return
@@ -392,14 +475,9 @@ export default function App(){
     }
     setCouponCode(code)
     go('cart')
-    try {
-      const quote = await requestCouponQuote(code, cart)
-      if (quote) setNotice(`Coupon ${quote.code} applied. You saved ${money(quote.discount)}.`)
-    } catch (error) {
-      setError(error.message)
-    }
+    await requestCouponQuote(code, cart)
   }
-  function openOfferCategory(card,linkedCategory){++searchRequest.current;setSearchLoading(false);setRecommendationsLoading(false);resetCatalogFilters();setSearch('');setSubmittedSearch('');setSearchResults(null);if(card.coupon_code){setCouponCode(card.coupon_code);requestCouponQuote(card.coupon_code,cart).catch(()=>{});navigator.clipboard?.writeText(card.coupon_code).catch(()=>{});setNotice(`Coupon ${card.coupon_code} is ready in your order summary.`)}if(linkedCategory){const parent=linkedCategory.parent?categories.find(item=>item.id===linkedCategory.parent):linkedCategory;setCategory(parent?.name||'');setSubcategory(linkedCategory.parent?linkedCategory.name:'')}else{setCategory(card.category||'');setSubcategory('')}setPage('shop');setError('');window.scrollTo({top:0,behavior:'smooth'})}
+  function openOfferCategory(card,linkedCategory){++searchRequest.current;setSearchLoading(false);setRecommendationsLoading(false);resetCatalogFilters();setSearch('');setSubmittedSearch('');setSearchResults(null);if(card.coupon_code){setCouponCode(card.coupon_code);requestCouponQuote(card.coupon_code,cart);navigator.clipboard?.writeText(card.coupon_code).catch(()=>{});setNotice(`Coupon ${card.coupon_code} is ready in your order summary.`)}if(linkedCategory){const parent=linkedCategory.parent?categories.find(item=>item.id===linkedCategory.parent):linkedCategory;setCategory(parent?.name||'');setSubcategory(linkedCategory.parent?linkedCategory.name:'')}else{setCategory(card.category||'');setSubcategory('')}setPage('shop');setError('');window.scrollTo({top:0,behavior:'smooth'})}
   async function updateProfile(e){e.preventDefault();try{const result=await api('/profile/',{method:'PATCH',body:JSON.stringify(profile)});setProfile(result);setNotice('Profile saved')}catch(e){setError(e.message)}}
   function useAddressForCheckout(address){if(!address)return;setForm(old=>({...old,full_name:address.full_name||old.full_name||'',phone:savedContactValue('phone',address.phone)||old.phone||'',address:address.address||old.address||'',city:address.city||old.city||'',postal_code:savedContactValue('postal_code',address.postal_code)||old.postal_code||''}))}
   async function saveAddress(e){e.preventDefault();try{const saved=await api('/addresses/',{method:'POST',body:JSON.stringify({...addressForm,is_default:addressForm.is_default||addresses.length===0})});setAddresses(old=>[saved,...old.map(a=>saved.is_default?{...a,is_default:false}:a)]);if(saved.is_default)useAddressForCheckout(saved);setAddressForm({label:'Home',full_name:'',phone:'',address:'',city:'',postal_code:'',is_default:false});setNotice('Address saved')}catch(e){setError(e.message)}}
@@ -416,8 +494,17 @@ export default function App(){
   async function setStorePublished(store,is_active){setBusy(true);setError('');try{await api(`/stores/${store.id}/`,{method:'PATCH',body:JSON.stringify({is_active})});await loadStoreLocations();setNotice(is_active?`${store.city} showroom published`:`${store.city} showroom hidden`)}catch(err){setError(err.message)}finally{setBusy(false)}}
   async function deleteStoreLocation(store){setBusy(true);setError('');try{await api(`/stores/${store.id}/`,{method:'DELETE'});await loadStoreLocations();setNotice(`${store.city} draft removed`)}catch(err){setError(err.message)}finally{setBusy(false)}}
   async function updateStatus(id,status){try{await api(`/orders/${id}/`,{method:'PATCH',body:JSON.stringify({status})});await loadOrders()}catch(e){setError(e.message)}}
-  function logout(){localStorage.removeItem('sofalux_access');localStorage.removeItem('sofalux_refresh');setUser(null);setCart([]);setModal('');setProfile({});setAddresses([]);setWishlistItems([]);setOrders([]);setForm({});setCouponCode('');requestCouponQuote('',[]);go('home')}
+  function logout(){localStorage.removeItem('sofalux_access');localStorage.removeItem('sofalux_refresh');setUser(null);setCart([]);setModal('');setProfile({});setAddresses([]);setWishlistItems([]);setOrders([]);setForm({});setCouponCode('');requestCouponQuote('',[]);pageHistory.current=[];go('home', false)}
   const image=(p)=>p.image_url||fallback
+  const detailStock = selected ? availableQuantity(selected) : 0
+  const detailBagCount = selected ? quantityInBag(selected) : 0
+  const relatedProducts = page==='detail' ? relatedCatalogProducts(selected, activeProducts, categories) : []
+  const detailQuantity = Math.min(selectedQuantity, Math.max(1, detailStock))
+  function addFromDetail(buyNow=false) {
+    if (!add(selected, selectedColor, detailQuantity)) return
+    setSelectedQuantity(1)
+    if (buyNow) go('cart')
+  }
   return <div className="app">
     <BankOfferStrip onShop={()=>{setNavDropdownClosed(false);searchProducts('')}}/>
     <div className="topline"><span className="topline-promise"><Truck size={18}/>Where elegance find its place!</span><span className="topline-delivery"><Gift size={18}/>Complimentary delivery on selected pieces</span><button type="button" onClick={openTrackOrder}><MapPin size={17}/>Track an order <ArrowRight size={15}/></button></div>
@@ -428,6 +515,7 @@ export default function App(){
       </div>
       <nav className={navDropdownClosed||(page==='shop'&&Boolean(subcategory))?'category-nav dismiss-dropdown':'category-nav'} aria-label="Main navigation"><button className={page==='home'?'active':''} onClick={()=>go('home')}>Home</button><button className={page==='shop'&&!category?'active':''} onClick={()=>{setNavDropdownClosed(false);searchProducts('')}}>Shop All</button>{parentCategories.slice(0,7).map(c=><div className={`nav-category ${category===c.name?'active':''}`} key={c.id} onMouseLeave={()=>setNavDropdownClosed(false)}><button onClick={()=>{setNavDropdownClosed(false);searchProducts('');setCategory(c.name)}}>{c.name}<ChevronDown size={13}/></button><div className="nav-dropdown">{categories.filter(x=>x.parent===c.id).map(child=><button key={child.id} onClick={()=>{searchProducts('');setCategory(c.name);selectSubcategory(child.name);setNavDropdownClosed(true)}}>{child.name}<ArrowRight size={12}/></button>)}</div></div>)}<button className={page==='orders'?'active':''} onClick={()=>go('orders')}>My Orders</button></nav>
     </header>
+    {(page!=='home'||pageHistory.current.length>0)&&<div className="storefront-back-bar"><button type="button" className="detail-back" onClick={goBack}><ArrowLeft size={16}/> Back</button></div>}
     {notice&&!['login','register','forgot','reset'].includes(modal)&&<button className="notice" onClick={()=>setNotice('')}>{notice}  x </button>}
     {error&&!modal&&<div className="error" role="alert">{error}<button onClick={()=>setError('')} aria-label="Dismiss message"> x </button></div>}
     {page==='home'&&<><HeroCarousel slide={heroBanner} slides={heroBanners} index={heroIndex} onIndexChange={setHeroIndex} onPause={setHeroCarouselPaused} categories={categories} offers={offers} onShop={openOfferCategory} onOfferCoupon={chooseOfferCoupon}/><section className="category-section"><div className="section-title"><h2>Popular <i>Categories</i></h2><button onClick={()=>{setCategory('');setSubcategory('');go('shop')}}>View all categories <ArrowRight size={14}/></button></div><div className="category-carousel-shell"><div className="category-carousel-controls"><button type="button" aria-label="Previous categories" onClick={()=>moveCategoryCarousel(-1)}><ChevronLeft size={16}/></button><button type="button" aria-label="Next categories" onClick={()=>moveCategoryCarousel(1)}><ChevronRight size={16}/></button></div><div className="category-viewport" ref={categoryCarouselRef} onMouseEnter={()=>setCategoryCarouselPaused(true)} onMouseLeave={()=>setCategoryCarouselPaused(false)}><div className="category-grid category-group">{[...parentCategories,...parentCategories].map((c,i)=>{const children=categories.filter(x=>x.parent===c.id).sort((a,b)=>(subcategoryOrder[c.name]||[]).indexOf(a.name)-(subcategoryOrder[c.name]||[]).indexOf(b.name));const ids=new Set([c.id,...children.map(x=>x.id)]);const product=products.find(p=>ids.has(p.category));return <div className={`category-card tone-${i%4}`} key={`${c.id}-${i}`}><button className="category-main" onClick={()=>{setCategory(c.name);setSubcategory('');go('shop')}}><span className="category-photo"><img src={c.image||(product?image(product):fallback)} alt={c.name}/></span><span className="category-name">{c.name}</span><span className="category-count">{categoryPrices[c.name]||'Explore collection'}</span></button><div className="category-submenu">{children.map(child=><button key={child.id} onClick={()=>{searchProducts('');setCategory(c.name);selectSubcategory(child.name);setNavDropdownClosed(true)}}><img src={categoryGalleryPhotos(child)[0]||child.image||fallback} alt=""/><span>{child.name}</span></button>)}</div></div>})}</div></div></div></section><HomeShelf title="Online Exclusive Spot Deals" kicker="A FRESH EROMA EDIT" products={onlineExclusiveProducts} onOpen={openProduct} onAdd={add} onWishlist={toggleWishlist} wishlistedIds={wishlistedIds} cart={cart} onViewAll={()=>{setCategory("");setSubcategory("");go("shop")}}/></>}
@@ -440,8 +528,25 @@ export default function App(){
     </main>}
     {page==='about'&&<StoreLocatorBanner locations={activeStoreLocations}/>}
     {page==='shop'&&<main className="content shop-page"><div className="pagehead"><span className="eyebrow">THE COLLECTION</span><h1>Find your <i>favourite.</i></h1><p role="status">{searchLoading ? `Searching for ${submittedSearch}...` : 'Explore pieces made for the way you live.'}</p></div><div className="filters"><button className={!category?'active':''} onClick={()=>{setCategory('');setSubcategory('')}}>All products</button>{parentCategories.map(c=><button key={c.id} className={category===c.name?'active':''} onClick={()=>{setCategory(c.name);setSubcategory('')}}>{c.name}</button>)}</div><div className="sort-control"><label htmlFor="sort-products">Sort by</label><select id="sort-products" value={sort} onChange={e=>setSort(e.target.value)}><option value="recommended">Recommended</option><option value="newest">Newest</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option><option value="name">Name</option></select></div><div className="shop-extra-filters"><label>Price<select aria-label="Filter by price" value={priceRange} onChange={e=>setPriceRange(e.target.value)}><option value="all">All prices</option><option value="under-10000">Under {money(10000)}</option><option value="10000-25000">{money(10000)} &ndash; {money(25000)}</option><option value="25000-50000">{money(25000)} &ndash; {money(50000)}</option><option value="above-50000">Above {money(50000)}</option></select></label><label>Availability<select aria-label="Filter by availability" value={stockFilter} onChange={e=>setStockFilter(e.target.value)}><option value="all">All stock</option><option value="available">In stock</option><option value="low">Low stock (1 to 5 left)</option><option value="out">Out of stock</option></select></label><label className="sale-filter"><input type="checkbox" checked={discountOnly} onChange={e=>setDiscountOnly(e.target.checked)}/>On sale</label><button type="button" className="clear-shop-filters" onClick={()=>{setPriceRange("all");setStockFilter("all");setDiscountOnly(false);setSort("recommended")}}>Clear filters</button></div>{category&&<div className="subcategory-filter"><label htmlFor="subcategory-select">Narrow your selection</label><select id="subcategory-select" value={subcategory} onChange={e=>selectSubcategory(e.target.value)}><option value="">All {category}</option>{categories.filter(c=>c.parent===parentCategories.find(parent=>parent.name===category)?.id).sort((a,b)=>(subcategoryOrder[category]||[]).indexOf(a.name)-(subcategoryOrder[category]||[]).indexOf(b.name)).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}</select></div>}{category&&!subcategory&&<section className="subcategory-cards" aria-label={`${category} subcategories`}>{visibleSubcategories.map(child=>{const photos=categoryGalleryPhotos(child);return <button className={`subcategory-card ${subcategory===child.name?"active":""}`} key={child.id} onClick={()=>selectSubcategory(child.name)}><img className="subcategory-card-cover" src={photos[0]||child.image||fallback} alt={child.name}/>{photos.length>1&&<span className="subcategory-card-thumbs">{photos.slice(1).map((src,index)=><img key={src} src={src} alt={`${child.name} view ${index+2}`}/>)}</span>}<span className="subcategory-card-name">{child.name}</span></button>})}</section>}{subcategory&&<div className="subcategory-results-title"><h2>{subcategory}</h2><span>{filtered.length} items</span></div>}<div className="shop-results-meta" role="status">{searchLoading ? `Searching for ${submittedSearch}...` : `${filtered.length} ${filtered.length===1?'piece':'pieces'} found${submittedSearch ? ` for ${submittedSearch}` : ''}`}</div><ProductGrid products={filtered} onOpen={openProduct} onAdd={add} onWishlist={toggleWishlist} wishlistedIds={wishlistedIds} cart={cart} showCartStatus={!submittedSearch}/></main>}
-    {page==='detail'&&selected&&<main className="detail"><button type="button" className="detail-back" onClick={backFromProduct}><ArrowLeft size={16}/> Back to browsing</button><ProductColourPreview product={selected} photo={image(selected)} colour={selectedColor} onChange={setSelectedColor}/><div><span className="eyebrow">{selected.category_name||'EROMA COLLECTION'}</span><h1>{selected.name}</h1><div className="price">{money(selected.price)}</div><button type="button" className="product-rating-link detail-rating" onClick={()=>document.querySelector('.review-section')?.scrollIntoView({behavior:'smooth'})}>{Number(selected.review_count)>0?<RatingStars rating={selected.average_rating} count={selected.review_count}/>:Number(selected.collective_review_count)>0&&!selected.collective_is_sample?<span className="rating-collective"><RatingStars rating={selected.collective_rating} count={selected.collective_review_count} collective/><small>Overall customer rating</small></span>:<span className="rating-collective"><RatingStars rating={sampleRatingFor(selected.id)} showCount={false}/><small>Sample rating</small></span>}</button><p>{selected.description}</p><p className="muted">Material: {selected.material||'Premium upholstery'} | {selected.seats} seats</p><p className={'stock-notice '+(selected.stock===0?'out':selected.stock<=5?'low':'ready')} role="status">{selected.stock===0?'Currently out of stock':selected.stock<=5?`Only ${selected.stock} left in stock � order soon`:`${selected.stock} available`}</p><button className="darkbtn" disabled={!selected.stock} onClick={()=>add(selected,selectedColor)}>Add to bag <ShoppingBag size={17}/></button><p className="muted">Secure checkout | Carefully packed | Made for everyday living</p><section className="review-section"><h2>Product reviews</h2>{reviews.length?reviews.map(review=><article className="review-card" key={review.id}><div className="review-card-heading"><b>{review.customer_name?.replace(/ \(Sample\)$/,'')} &mdash; {review.customer_name?.endsWith(' (Sample)')?'Sample review &mdash; not verified':'Customer review'}</b><RatingStars rating={review.rating}/></div><p>{review.body}</p></article>):<p className="muted">No approved reviews yet.</p>}<div className="review-form-wrap">{reviewEligibility.loading?<p className="muted">Checking purchase eligibility�</p>:reviewEligibility.purchased&&!reviewEligibility.alreadyReviewed?<form onSubmit={submitReview}><h3>Write a product review</h3><p className="review-help">Share what you think about this piece. Reviews are available to customers who purchased it.</p><RatingStars rating={reviewForm.rating} interactive onChange={rating=>setReviewForm({...reviewForm,rating})}/><textarea required minLength="5" placeholder="What did you like about this product?" value={reviewForm.body} onChange={e=>setReviewForm({...reviewForm,body:e.target.value})}/><button className="outline">Submit review</button><small>Reviews are published after moderation.</small></form>:!user?<p className="review-help">Sign in to check review eligibility. Reviews are only available to customers who purchased this piece.</p>:reviewEligibility.alreadyReviewed?<p className="review-help">Thanks for sharing your experience. Your review is awaiting moderation.</p>:<p className="review-help">Only customers with a completed or delivered order for this piece can write a review.</p>}</div></section></div></main>}
-    {page==='cart'&&<main className="content"><div className="pagehead"><span className="eyebrow">YOUR SELECTION</span><h1>Your shopping <i>bag.</i></h1></div>{!cart.length?<div className="empty">Your bag is waiting for something comfortable.<button className="darkbtn" onClick={()=>go('shop')}>Explore sofas</button></div>:<div className="cartlayout"><div>{cart.map(x=><div className="cartrow" key={`${x.id}-${x.color||''}`}><button type="button" className="cart-product-photo" aria-label={`View ${x.name} product details`} onClick={()=>openBagProduct(x)}><img src={x.image_url||fallback} alt=""/></button><div className="cartname"><button type="button" className="cart-product-name" onClick={()=>openBagProduct(x)}>{x.name}</button>{x.color&&<small className="cart-color-label">Color: {x.color}</small>}<span className="cart-unit-price">Unit price: {money(x.price)}</span><strong className="cart-line-total">Line total: {money(x.price*x.quantity)}</strong><div className="qty" aria-label={`Quantity for ${x.name}`}><button type="button" aria-label={`Remove one ${x.name}`} title="Remove one" onClick={()=>qty(x.id,x.quantity-1,x.color||'')}><Minus size={14}/></button><span className="qty-count">{x.quantity}</span><button type="button" aria-label={`Add one ${x.name}`} title="Add one" disabled={x.quantity>=x.stock} onClick={()=>qty(x.id,Math.min(x.stock,x.quantity+1),x.color||'')}><Plus size={14}/></button></div></div><button className="iconbtn" aria-label={`Remove ${x.name} from bag`} title="Remove item" onClick={()=>qty(x.id,0,x.color||'')}><Trash2 size={17}/></button></div>)}</div><form className="summary" onSubmit={checkout} noValidate={!user}><h3>Order summary</h3><div className="sumline"><span>Items subtotal</span><b>{money(total)}</b></div><div className="sumline"><span>Tax included in prices ({gstRate}% GST)</span><b>{money(taxAmount)}</b></div><div className="sumline"><span>Delivery</span><b>{deliveryFee===0?"Free":money(deliveryFee)}</b></div><div className="coupon-control"><input aria-label="Coupon code" placeholder="Enter coupon code" value={couponCode} onChange={e=>{setCouponCode(e.target.value);requestCouponQuote('',[])}}/><button type="button" className="outline" onClick={()=>applyCoupon()} disabled={couponChecking}>{couponChecking?'Checking coupon...':'Apply coupon'}</button></div><p className="coupon-hint">Choose an active offer below or enter a code before payment.</p><CartCouponOffers coupons={availableCoupons} categories={categories} selectedCode={couponQuote?.code||''} onApply={applyCoupon}/>{couponQuote&&<><div className="sumline"><span>Discount ({couponQuote.code})</span><b>-{money(couponQuote.discount)}</b></div><div className="coupon-applied-message"><span>{String.fromCharCode(10003)} {couponQuote.code} applied. You saved {money(couponQuote.discount)}.</span><button type="button" onClick={()=>copyCoupon(couponQuote.code)}>Copy code</button></div></>}<div className="sumline grand"><span>Total</span><b>{money(payableTotal)}</b></div><h3>Delivery details</h3>{['full_name','email','phone','address','city','postal_code'].map(k=><input required key={k} type={k==='email'?'email':'text'} {...contactInputProps(k)} placeholder={k.replace('_',' ').replace(/^\w/,c=>c.toUpperCase())} value={form[k]||''} onChange={e=>setForm({...form,[k]:contactInputValue(k,e.target.value)})}/>)}<label className="payment-choice">Payment method<select value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)}><option value="cod">Cash on Delivery</option><option value="razorpay" disabled={!razorpayConfig.enabled}>Pay online with Razorpay{!razorpayConfig.enabled?" (setup required)":""}</option><option value="razorpay_emi" disabled={!razorpayConfig.enabled}>Card EMI with Razorpay{!razorpayConfig.enabled?" (setup required)":""}</option>{import.meta.env.DEV&&<option value="test_card">Simulated test card (development only)</option>}</select></label><button className="darkbtn full" disabled={busy||couponChecking}>{paymentMethod==='cod'?'Place COD order':paymentMethod==='razorpay_emi'?'Continue to card EMI':paymentMethod==='razorpay'?'Pay securely with Razorpay':'Run simulated test payment'} <ArrowRight size={16}/></button><small>{paymentMethod==='cod'?'Cash on Delivery | No online payment is collected.':paymentMethod==='razorpay_emi'?'Razorpay Checkout will open. Choose EMI, then Credit Card EMI and an available tenure. Plans depend on your card and merchant account.':paymentMethod==='razorpay'?'Secure online payment by card, UPI, net banking or wallet via Razorpay.':'Development simulation only. No real payment is collected.'}</small></form></div>}</main>}
+    {page==='detail'&&selected&&<main className="detail"><ProductColourPreview key={selected.id} product={selected} photo={image(selected)} colour={selectedColor} onChange={setSelectedColor}/><div><span className="eyebrow">{selected.category_name||'EROMA COLLECTION'}</span><h1>{selected.name}</h1><div className="price detail-price"><strong>{money(selected.price)}</strong>{productDiscountPercent(selected)>0&&<><del>{money(selected.regular_price)}</del><span>{productDiscountPercent(selected)}% off</span></>}</div><button type="button" className="product-rating-link detail-rating" onClick={()=>document.querySelector('.review-section')?.scrollIntoView({behavior:'smooth'})}>{Number(selected.review_count)>0?<RatingStars rating={selected.average_rating} count={selected.review_count}/>:Number(selected.collective_review_count)>0&&!selected.collective_is_sample?<span className="rating-collective"><RatingStars rating={selected.collective_rating} count={selected.collective_review_count} collective/><small>Overall customer rating</small></span>:<span className="rating-collective"><RatingStars rating={sampleRatingFor(selected.id)} showCount={false}/><small>Sample rating</small></span>}</button><p className={'stock-notice '+(detailStock===0?'out':detailStock<=5?'low':'ready')} role="status">{Number(selected.stock)===0?'Currently out of stock':`${detailStock} available`}</p><div className="detail-purchase">
+      <div className="detail-quantity"><span>Quantity</span><div className="qty" role="group" aria-label="Quantity">
+        <button type="button" aria-label="Decrease quantity" disabled={detailQuantity<=1} onClick={()=>setSelectedQuantity(detailQuantity-1)}><Minus size={14}/></button>
+        <output className="qty-count" aria-live="polite">{detailQuantity}</output>
+        <button type="button" aria-label="Increase quantity" disabled={detailQuantity>=detailStock} onClick={()=>setSelectedQuantity(detailQuantity+1)}><Plus size={14}/></button>
+      </div><span className="detail-bag-count" role="status">{detailBagCount} in your bag</span></div>
+      {detailStock===0&&Number(selected.stock)>0&&<small>All available units are already in your bag.</small>}
+      <div className="detail-purchase-actions">
+        <button type="button" className="outline" disabled={!detailStock} onClick={()=>addFromDetail()}>Add to bag <ShoppingBag size={17}/></button>
+        <button type="button" className="darkbtn" disabled={!detailStock} onClick={()=>addFromDetail(true)}>Buy now <ArrowRight size={17}/></button>
+      </div>
+    </div></div>
+      <ProductDescription product={selected}/>
+      {relatedProducts.length>0&&<section className="detail-section detail-related" aria-labelledby="related-products-title">
+        <h2 id="related-products-title">Related products</h2>
+        <ProductGrid products={relatedProducts} onOpen={openProduct} onAdd={add} onWishlist={toggleWishlist} wishlistedIds={wishlistedIds} cart={cart}/>
+      </section>}
+      <section className="review-section detail-section"><h2>Product reviews</h2>{reviews.length?reviews.map(review=><article className="review-card" key={review.id}><div className="review-card-heading"><b>{review.customer_name?.replace(/ \(Sample\)$/,'')} &mdash; {review.customer_name?.endsWith(' (Sample)')?'Sample review &mdash; not verified':'Customer review'}</b><RatingStars rating={review.rating}/></div><p>{review.body}</p></article>):<p className="muted">No approved reviews yet.</p>}<div className="review-form-wrap">{reviewEligibility.loading?<p className="muted">Checking purchase eligibility�</p>:reviewEligibility.purchased&&!reviewEligibility.alreadyReviewed?<form onSubmit={submitReview}><h3>Write a product review</h3><p className="review-help">Share what you think about this piece. Reviews are available to customers who purchased it.</p><RatingStars rating={reviewForm.rating} interactive onChange={rating=>setReviewForm({...reviewForm,rating})}/><textarea required minLength="5" placeholder="What did you like about this product?" value={reviewForm.body} onChange={e=>setReviewForm({...reviewForm,body:e.target.value})}/><button className="outline">Submit review</button><small>Reviews are published after moderation.</small></form>:!user?<p className="review-help">Sign in to check review eligibility. Reviews are only available to customers who purchased this piece.</p>:reviewEligibility.alreadyReviewed?<p className="review-help">Thanks for sharing your experience. Your review is awaiting moderation.</p>:<p className="review-help">Only customers with a completed or delivered order for this piece can write a review.</p>}</div></section></main>}
+    {page==='cart'&&<main className="content"><div className="pagehead"><span className="eyebrow">YOUR SELECTION</span><h1>Your shopping <i>bag.</i></h1></div>{!cart.length?<div className="empty">Your bag is waiting for something comfortable.<button className="darkbtn" onClick={()=>go('shop')}>Explore sofas</button></div>:<div className="cartlayout"><div>{cart.map(x=><div className="cartrow" key={`${x.id}-${x.color||''}`}><button type="button" className="cart-product-photo" aria-label={`View ${x.name} product details`} onClick={()=>openBagProduct(x)}><img src={x.image_url||fallback} alt=""/></button><div className="cartname"><button type="button" className="cart-product-name" onClick={()=>openBagProduct(x)}>{x.name}</button>{x.color&&<small className="cart-color-label">Color: {x.color}</small>}<span className="cart-unit-price">Unit price: {money(x.price)}</span><strong className="cart-line-total">Line total: {money(x.price*x.quantity)}</strong><div className="qty" aria-label={`Quantity for ${x.name}`}><button type="button" aria-label={`Remove one ${x.name}`} title="Remove one" onClick={()=>qty(x.id,x.quantity-1,x.color||'')}><Minus size={14}/></button><span className="qty-count">{x.quantity}</span><button type="button" aria-label={`Add one ${x.name}`} title="Add one" disabled={x.quantity>=x.stock} onClick={()=>qty(x.id,Math.min(x.stock,x.quantity+1),x.color||'')}><Plus size={14}/></button></div></div><button className="iconbtn" aria-label={`Remove ${x.name} from bag`} title="Remove item" onClick={()=>qty(x.id,0,x.color||'')}><Trash2 size={17}/></button></div>)}</div><form className="summary" onSubmit={checkout} noValidate={!user}><h3>Order summary</h3><div className="sumline"><span>Items subtotal</span><b>{money(total)}</b></div><div className="sumline"><span>Tax included in prices ({gstRate}% GST)</span><b>{money(taxAmount)}</b></div><div className="sumline"><span>Delivery</span><b>{deliveryFee===0?"Free":money(deliveryFee)}</b></div><div className="coupon-control"><input aria-label="Coupon code" placeholder="Enter coupon code" value={couponCode} onChange={e=>{setCouponCode(e.target.value);requestCouponQuote('',[])}}/><button type="button" className="outline" onClick={()=>applyCoupon()} disabled={couponChecking}>{couponChecking?'Checking coupon...':'Apply coupon'}</button></div>{couponQuote&&<div className="coupon-applied-message" role="status">{couponQuote.code} applied. You saved {money(couponQuote.discount)}.</div>}{couponError&&<div className="coupon-inline-error" role="alert">{couponError}</div>}<CartCouponOffers coupons={availableCoupons} selectedCode={couponQuote?.code||''} onApply={applyCoupon} disabled={couponChecking}/>{couponQuote&&<div className="sumline"><span>Discount ({couponQuote.code})</span><b>-{money(couponQuote.discount)}</b></div>}<div className="sumline grand"><span>Total</span><b>{money(payableTotal)}</b></div><h3>Delivery details</h3>{['full_name','email','phone','address','city','postal_code'].map(k=><input required key={k} type={k==='email'?'email':'text'} {...contactInputProps(k)} placeholder={k.replace('_',' ').replace(/^\w/,c=>c.toUpperCase())} value={form[k]||''} onChange={e=>setForm({...form,[k]:contactInputValue(k,e.target.value)})}/>)}<label className="payment-choice">Payment method<select value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)}><option value="cod">Cash on Delivery</option><option value="razorpay" disabled={!razorpayConfig.enabled}>Pay online with Razorpay{!razorpayConfig.enabled?" (setup required)":""}</option><option value="razorpay_emi" disabled={!razorpayConfig.enabled}>Card EMI with Razorpay{!razorpayConfig.enabled?" (setup required)":""}</option>{import.meta.env.DEV&&<option value="test_card">Simulated test card (development only)</option>}</select></label><button className="darkbtn full" disabled={busy||couponChecking}>{paymentMethod==='cod'?'Place COD order':paymentMethod==='razorpay_emi'?'Continue to card EMI':paymentMethod==='razorpay'?'Pay securely with Razorpay':'Run simulated test payment'} <ArrowRight size={16}/></button><small>{paymentMethod==='cod'?'Cash on Delivery | No online payment is collected.':paymentMethod==='razorpay_emi'?'Razorpay Checkout will open. Choose EMI, then Credit Card EMI and an available tenure. Plans depend on your card and merchant account.':paymentMethod==='razorpay'?'Secure online payment by card, UPI, net banking or wallet via Razorpay.':'Development simulation only. No real payment is collected.'}</small></form></div>}</main>}
     {page==='wishlist'&&<main className="content"><div className="pagehead"><span className="eyebrow">SAVED FOR LATER</span><h1>Your <i>wishlist.</i></h1></div>{!user?<p>Sign in to view your saved items.</p>:<ProductGrid products={products.filter(p=>wishlistItems.some(item=>item.product.id===p.id))} onOpen={openProduct} onAdd={add} onWishlist={toggleWishlist} wishlistedIds={wishlistedIds} cart={cart}/>}</main>}
     {page==='profile'&&<main className="content"><div className="pagehead"><span className="eyebrow">YOUR ACCOUNT</span><h1>Profile & <i>addresses.</i></h1></div><div className="profile-layout"><form className="summary" onSubmit={updateProfile}><h3>Personal details</h3>{[['username','Username'],['email','Email'],['first_name','First name'],['last_name','Last name'],['phone','Phone']].map(([key,label])=><input key={key} required={key==='username'||key==='email'} type={key==='email'?'email':'text'} {...contactInputProps(key)} placeholder={label} value={profile[key]||''} onChange={e=>setProfile({...profile,[key]:contactInputValue(key,e.target.value)})}/>)}<button className="darkbtn full">Save profile</button></form><section className="summary"><h3>Delivery addresses</h3>{addresses.map(a=><article className="saved-address" key={a.id}><b>{a.label} {a.is_default&&<small>DEFAULT</small>}</b><span>{a.full_name} | {a.phone}</span><span>{a.address}, {a.city} {a.postal_code}</span><div><button type="button" className="textbtn" onClick={()=>setDefaultAddress(a.id)}>Set default</button><button type="button" className="textbtn" onClick={()=>deleteAddress(a.id)}>Remove</button></div></article>)}<form className="address-form" onSubmit={saveAddress}><h3>Add an address</h3>{[['label','Label'],['full_name','Full name'],['phone','Phone'],['address','Street address'],['city','City'],['postal_code','Postal code']].map(([key,label])=><input key={key} required {...contactInputProps(key)} placeholder={label} value={addressForm[key]||''} onChange={e=>setAddressForm({...addressForm,[key]:contactInputValue(key,e.target.value)})}/>)}<label className="checkline"><input type="checkbox" checked={!!addressForm.is_default} onChange={e=>setAddressForm({...addressForm,is_default:e.target.checked})}/> Make default</label><button className="darkbtn">Save address</button></form></section></div></main>}
     {page==='track-order'&&<TrackOrderPage code={trackingCodeInput} setCode={value=>{setTrackingCodeInput(value.toUpperCase());setTrackingError('')}} result={trackingResult} error={trackingError} loading={trackingLoading} onSubmit={lookupTracking}/>}
@@ -487,9 +592,12 @@ function EmiOptions({price}){
  return <details className="product-emi"><summary>From {money(Math.ceil(price/12))}/month | EMI options</summary><div><b>Estimated monthly payments</b><ul>{[3,6,9,12].map(months=><li key={months}><span>{months} months</span><strong>{money(Math.ceil(price/months))}/month</strong></li>)}</ul><small>Estimates only. EMI availability, interest, and final terms depend on your bank and payment provider.</small></div></details>
 }
 
-export function CartCouponOffers({coupons,categories,selectedCode,onApply}){
- if(!coupons.length)return <p className="coupon-hint">No active coupons are available right now. You can still enter a coupon code above.</p>
- return <section className="cart-coupon-offers"><h4>Available coupons</h4>{coupons.map(coupon=>{const discount=coupon.discount_type==='percent'?`${Number(coupon.discount_value)}% off`:`Save ${money(coupon.discount_value)}`;const categoryNames=categories.filter(item=>coupon.categories?.includes(item.id)).map(item=>item.name);return <article className={selectedCode===coupon.code?'selected':''} key={coupon.code}><div><b>{coupon.code}</b><span>{discount}{Number(coupon.minimum_order)>0?` \u00b7 Min. ${money(coupon.minimum_order)}`:''}</span><small>{coupon.description|| (categoryNames.length?`For ${categoryNames.join(', ')}`:'For eligible products')}{categoryNames.length?` Eligible categories: ${categoryNames.join(', ')}.`:''}</small></div><button type="button" onClick={()=>onApply(coupon.code)}>{selectedCode===coupon.code?'Applied':'Apply'}</button></article>})}</section>
+export function CartCouponOffers({coupons,selectedCode,onApply,disabled}) {
+  if (!coupons.length) return null
+  return <div className="cart-coupon-offers" role="group" aria-label="Available coupon codes">
+    {coupons.map(({code})=><button key={code} type="button" aria-pressed={selectedCode===code}
+      disabled={disabled} onClick={()=>onApply(code)}>{code}</button>)}
+  </div>
 }
 
 function HomeShelf({title,kicker,products,onOpen,onAdd,onWishlist,wishlistedIds,cart,onViewAll}){

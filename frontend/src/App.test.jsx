@@ -74,6 +74,75 @@ describe('storefront flows', () => {
     expect(screen.getByPlaceholderText('Phone')).toHaveValue('9876543210')
     expect(screen.getByPlaceholderText('Postal code')).toHaveValue('400001')
   })
+
+  it('confirms coupon savings beside the apply controls', async () => {
+    localStorage.setItem('sofalux_access', 'test-token')
+    localStorage.setItem('eroma_cart_user_1', JSON.stringify([{...sofa, quantity: 1}]))
+    mockStore({
+      '/me/': {id: 1, username: 'shopper'},
+      '/coupons/available/': [{code: 'HOME600'}],
+      '/coupons/validate/': {code: 'HOME600', discount: 600},
+    })
+    render(<App/>)
+    fireEvent.click(await screen.findByRole('button', {name: 'Shopping bag: 1 items'}))
+    fireEvent.click(await screen.findByRole('button', {name: 'HOME600'}))
+    const message = await screen.findByText(/HOME600 applied. You saved/)
+    expect(message).toHaveClass('coupon-applied-message')
+    expect(message.previousElementSibling).toContainElement(screen.getByRole('button', {name: 'Apply coupon'}))
+    expect(screen.getByRole('button', {name: 'HOME600'})).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('adds the chosen quantity from product details and goes back through the visited pages', async () => {
+    mockStore({'/products/': [{...sofa, stock: 10}, table]})
+    render(<App/>)
+    fireEvent.click(screen.getByRole('button', {name: 'Shop All'}))
+    fireEvent.click(await screen.findByAltText('Luna sofa'))
+
+    expect(screen.getByText('0 in your bag')).toBeInTheDocument()
+    expect(screen.getByText('10 available')).toBeInTheDocument()
+    const increase = screen.getByRole('button', {name: 'Increase quantity'})
+    for (let step=0; step<3; step++) fireEvent.click(increase)
+    expect(screen.getByText('10 available')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: 'Add to bag'}))
+    expect(screen.getByText('4 in your bag')).toBeInTheDocument()
+    expect(screen.getByText('6 available')).toBeInTheDocument()
+    expect(screen.getByRole('button', {name: 'Shopping bag: 4 items'})).toBeInTheDocument()
+    for (let step=0; step<5; step++) fireEvent.click(increase)
+    expect(screen.getByRole('button', {name: 'Increase quantity'})).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', {name: 'Buy now'}))
+    expect(screen.getByRole('button', {name: 'Shopping bag: 10 items'})).toBeInTheDocument()
+    expect(screen.getByRole('heading', {name: /your shopping bag/i})).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', {name: 'Back', exact: true}))
+    expect(screen.getByRole('heading', {name: 'Luna sofa', level: 1})).toBeInTheDocument()
+    expect(screen.getByText('10 in your bag')).toBeInTheDocument()
+    expect(screen.getByText('0 available')).toBeInTheDocument()
+    expect(screen.getByRole('button', {name: 'Buy now'})).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', {name: 'Back', exact: true}))
+    expect(screen.getByRole('heading', {name: /find your favourite/i})).toBeInTheDocument()
+  })
+
+  it('shows the catalog description and related products while keeping product back history', async () => {
+    const source = {...sofa, category: 2, description: 'A compact sofa for a smaller room.', dimensions: '150 x 85 x 80 cm'}
+    const related = {...sofa, id: 43, name: 'Rowan sofa', category: 3, description: 'A deeper sofa with soft cushions.', image_url: '/media/rowan.jpg'}
+    mockStore({
+      '/products/': [source, related, {...table, category: 4}],
+      '/categories/': [{id: 1, name: 'Sofas', parent: null}, {id: 2, name: 'Two-seater Sofas', parent: 1},
+        {id: 3, name: 'Three-seater Sofas', parent: 1}, {id: 4, name: 'Tables', parent: null}],
+    })
+    render(<App/>)
+    fireEvent.click(screen.getByRole('button', {name: 'Shop All'}))
+    fireEvent.click(await screen.findByAltText('Luna sofa'))
+    expect(screen.getByRole('region', {name: 'Product description'})).toHaveTextContent(source.description)
+    expect(screen.getByText(source.dimensions)).toBeInTheDocument()
+    const suggestions = screen.getByRole('region', {name: 'Related products'})
+    expect(suggestions).toHaveTextContent('Rowan sofa')
+    expect(suggestions).not.toHaveTextContent('Oak table')
+    fireEvent.click(suggestions.querySelector('img'))
+    expect(screen.getByRole('heading', {name: 'Rowan sofa', level: 1})).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: 'Back', exact: true}))
+    expect(screen.getByRole('heading', {name: 'Luna sofa', level: 1})).toBeInTheDocument()
+  })
 })
 
 it('opens the catalog when the bank name is clicked and exposes each offer once', () => {
@@ -158,18 +227,16 @@ describe('ProductGrid', () => {
 })
 
 describe('CartCouponOffers', () => {
-  it('shows available coupon details and applies the selected code', () => {
+  it('shows only the code and applies it when clicked', () => {
     const onApply = vi.fn()
     render(<CartCouponOffers
       coupons={[{ code: 'HOME10', discount_type: 'percent', discount_value: 10, minimum_order: 5000, description: 'Furniture offer' }]}
-      categories={[]}
       selectedCode=""
       onApply={onApply}
     />)
 
-    expect(screen.getByText('HOME10')).toBeInTheDocument()
-    expect(screen.getByText(/10% off · Min\. ₹5,000/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(screen.queryByText('Furniture offer')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'HOME10' }))
     expect(onApply).toHaveBeenCalledWith('HOME10')
   })
 })
