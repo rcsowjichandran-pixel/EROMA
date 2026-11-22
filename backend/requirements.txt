@@ -15,6 +15,7 @@ psycopg-binary==3.3.9
 PyJWT==2.15.1
 python-dotenv==1.2.4
 razorpay==2.0.1
+reportlab==5.1.0
 requests==2.34.2
 boto3==1.44.9
 botocore==1.44.9

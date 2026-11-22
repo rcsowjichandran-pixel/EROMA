@@ -90,6 +90,8 @@ describe('storefront flows', () => {
     expect(screen.getByPlaceholderText('Email')).toHaveValue('luna@example.com')
     expect(screen.getByPlaceholderText('Phone')).toHaveValue('9876543210')
     expect(screen.getByPlaceholderText('Postal code')).toHaveValue('400001')
+    expect(screen.getByText('Estimated delivery')).toBeInTheDocument()
+    expect(screen.getByText(/5–10 calendar days/)).toBeInTheDocument()
   })
 
   it('confirms coupon savings beside the apply controls', async () => {

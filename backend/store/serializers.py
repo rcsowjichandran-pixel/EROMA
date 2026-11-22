@@ -233,6 +233,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
+    bill_available = serializers.BooleanField(read_only=True)
     coupon_code = serializers.CharField(source="coupon.code", read_only=True, allow_null=True)
     tracking_status = serializers.SerializerMethodField()
     tracking_demo = serializers.SerializerMethodField()
@@ -256,7 +257,8 @@ class OrderSerializer(serializers.ModelSerializer):
         model = Order
         fields = ("id", "full_name", "email", "phone", "address", "city", "postal_code",
                   "payment_method", "payment_status", "payment_instrument", "emi_requested", "status", "total", "discount_amount",
-                  "shipping_amount", "tax_amount", "coupon_code", "tracking_code", "created_at", "tracking_status", "tracking_demo", "items")
+                  "shipping_amount", "tax_amount", "coupon_code", "tracking_code", "created_at",
+                  "tracking_status", "tracking_demo", "bill_available", "items")
         read_only_fields = ("payment_instrument", "emi_requested")
 
 class OrderLineInputSerializer(serializers.Serializer):

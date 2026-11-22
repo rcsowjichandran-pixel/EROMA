@@ -21,6 +21,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.mail import EmailMessage, send_mail
 from django.db import transaction
 from django.db.models import Sum, Q, F, Avg, Count, Max, Prefetch
+from django.http import FileResponse
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
@@ -30,6 +31,7 @@ from .serializers import AddressSerializer, RegisterSerializer, ProductSerialize
 from .permissions import IsStaffOrReadOnly
 from .contact_fields import PHONE_PATTERN, PIN_PATTERN, PHONE_ERROR, PIN_ERROR
 from .checkout_amounts import coupon_discount
+from .order_bills import render_order_bill
 
 logger = logging.getLogger(__name__)
 
@@ -803,6 +805,19 @@ class OrderViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Order.objects.prefetch_related("items").order_by("-created_at")
         return qs if self.request.user.is_staff else qs.filter(user=self.request.user)
+
+    @action(detail=True, methods=["get"])
+    def bill(self, request, pk=None):
+        order = self.get_object()
+        if not order.bill_available:
+            return Response({"detail": "A bill is unavailable for this order."}, status=status.HTTP_409_CONFLICT)
+        response = FileResponse(
+            render_order_bill(order), as_attachment=True, filename=f"EROMA-bill-{order.pk}.pdf",
+            content_type="application/pdf",
+        )
+        response["Cache-Control"] = "private, no-store"
+        return response
+
     def create(self, request, *args, **kwargs):
         if request.data.get("payment_method") == "razorpay":
             return Response({"detail": "Start Razorpay payments through the secure Razorpay checkout endpoint."}, status=400)

@@ -391,6 +391,14 @@ class Order(models.Model):
             import uuid
             self.tracking_code = uuid.uuid4().hex[:12].upper()
         super().save(*args, **kwargs)
+    @property
+    def bill_available(self):
+        return (
+            self.status != "cancelled"
+            and self.payment_status not in ("failed", "refunded")
+            and (self.payment_method == "cod" or self.payment_status == "paid")
+        )
+
     def __str__(self): return f"Order #{self.pk} — {self.user.username}"
 
 class OrderItem(models.Model):

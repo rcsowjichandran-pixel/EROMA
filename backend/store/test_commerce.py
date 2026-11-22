@@ -72,6 +72,34 @@ class CommerceApiTests(TestCase):
         self.assertEqual(Decimal(placed.data["total"]), Decimal("1949.01"))
         self.assertEqual(self.client.get(f"/api/products/{self.product.id}/").data["stock"], 4)
 
+    def test_bill_download_is_limited_to_the_order_owner_and_eligible_orders(self):
+        placed = self.client.post("/api/orders/", self.order_payload(), format="json")
+        self.assertEqual(placed.status_code, 201, placed.data)
+        self.assertTrue(placed.data["bill_available"])
+        order_id = placed.data["id"]
+        url = f"/api/orders/{order_id}/bill/"
+
+        bill = self.client.get(url)
+        self.assertEqual(bill.status_code, 200)
+        self.assertEqual(bill["Content-Type"], "application/pdf")
+        self.assertEqual(bill["Content-Disposition"], f'attachment; filename="EROMA-bill-{order_id}.pdf"')
+        self.assertTrue(b"".join(bill.streaming_content).startswith(b"%PDF-"))
+
+        other = APIClient()
+        other.force_authenticate(User.objects.create_user("other-shopper"))
+        self.assertEqual(other.get(url).status_code, 404)
+        self.assertEqual(APIClient().get(url).status_code, 401)
+
+        orders = Order.objects.filter(pk=order_id)
+        orders.update(payment_method="razorpay", payment_status="pending")
+        self.assertEqual(self.client.get(url).status_code, 409)
+        orders.update(payment_status="paid")
+        paid = self.client.get(url)
+        self.assertEqual(paid.status_code, 200)
+        paid.close()
+        orders.update(status="cancelled")
+        self.assertEqual(self.client.get(url).status_code, 409)
+
     @override_settings(RAZORPAY_KEY_ID="test-id", RAZORPAY_KEY_SECRET="test-secret")
     @patch("store.views._razorpay_request")
     def test_failed_razorpay_releases_stock_once_and_excludes_attempt_from_order_counts(self, gateway):

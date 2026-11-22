@@ -47,7 +47,7 @@ function renewSession(refresh) {
   return renewal.promise
 }
 
-export async function api(path, options={}) {
+export async function api(path, {download=false, ...options}={}) {
   const authEndpoint = path.startsWith('/auth/')
   const access = authEndpoint ? null : getToken()
   const refresh = authEndpoint ? null : getRefreshToken()
@@ -65,6 +65,7 @@ export async function api(path, options={}) {
     if (updated && getToken() === updated) response = await send(updated)
     else if (access && !hasSession()) response = await send(null)
   }
+  if (download && response.ok) return response.blob()
   const data = response.status === 204 ? null : await response.json().catch(()=>({}))
   if (!response.ok) {
     const messages = Object.values(data || {}).flat().filter(message => typeof message === 'string')
