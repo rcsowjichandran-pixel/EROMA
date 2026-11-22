@@ -610,6 +610,7 @@ class StoreChatView(APIView):
                 settings.GEMINI_MODEL,
                 settings.GEMINI_FALLBACK_MODEL,
                 "gemini-flash-latest",
+                "gemini-3.1-flash-lite",
             )))
             for model_index, model_name in enumerate(model_names):
                 gemini_request = urllib.request.Request(
