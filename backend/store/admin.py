@@ -414,6 +414,7 @@ class OrderAdmin(admin.ModelAdmin):
     form = OrderManagementForm
     list_display = (
         "id",
+        "tracking_code",
         "user",
         "full_name",
         "total",
@@ -424,6 +425,7 @@ class OrderAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = ("status", "payment_status", "payment_method", "created_at")
-    search_fields = ("full_name", "email", "phone")
+    search_fields = ("tracking_code", "full_name", "email", "phone")
     list_editable = ("status", "payment_status")
+    readonly_fields = ("tracking_code",)
     inlines = [OrderItemInline]

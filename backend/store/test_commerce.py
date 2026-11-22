@@ -6,7 +6,7 @@ from urllib.parse import urlparse, parse_qs
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from PIL import Image
 from rest_framework.test import APIClient
 
@@ -378,6 +378,22 @@ class CommerceApiTests(TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.data["products"], 1)
         self.assertEqual(result.data["users"], 1)
+
+    def test_admin_order_list_displays_and_searches_tracking_code(self):
+        placed = self.client.post("/api/orders/", self.order_payload(), format="json")
+        self.assertEqual(placed.status_code, 201, placed.data)
+        tracking_code = placed.data["tracking_code"]
+        self.user.is_staff = True
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_staff", "is_superuser"])
+        admin_client = Client()
+        admin_client.force_login(self.user)
+
+        order_list = admin_client.get("/admin/store/order/")
+        self.assertContains(order_list, "Tracking code")
+        self.assertContains(order_list, tracking_code)
+        search = admin_client.get("/admin/store/order/", {"q": tracking_code})
+        self.assertContains(search, tracking_code)
 
     @override_settings(GEMINI_API_KEY="")
     def test_store_assistant_compares_wooden_and_cushioned_sofas_without_ai(self):
