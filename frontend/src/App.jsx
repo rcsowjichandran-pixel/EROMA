@@ -120,6 +120,32 @@ function relatedCatalogProducts(product, products, categories) {
     || Math.abs(Number(a.price)-Number(product.price))-Math.abs(Number(b.price)-Number(product.price))).slice(0,4)
 }
 
+function personalisedProducts(products, categories, recentlyViewed, wishlistItems) {
+  const catalog = new Map(products.map(product=>[product.id, product]))
+  const parents = new Map(categories.map(category=>[category.id, category.parent || category.id]))
+  const savedProducts = wishlistItems.map(item=>item.product)
+  const signals = [
+    ...recentlyViewed.map((product, index)=>[catalog.get(product.id) || product, 1 / (index + 1)]),
+    ...savedProducts.map(product=>[catalog.get(product.id) || product, 2]),
+  ]
+  if (!signals.length) return []
+
+  const knownIds = new Set([...recentlyViewed, ...savedProducts].map(product=>product.id))
+  return products.filter(product=>product.status==='active' && Number(product.stock)>0 && !knownIds.has(product.id))
+    .map(product=>({product, score:signals.reduce((total, [signal, weight])=>{
+      const sameCategory = (signal.category && signal.category===product.category)
+        || (signal.category_name && signal.category_name===product.category_name)
+      const family = parents.get(product.category)
+      const sameFamily = family && family===parents.get(signal.category)
+      const material = product.material?.trim().toLowerCase()
+      const sameMaterial = material && material===signal.material?.trim().toLowerCase()
+      return total + weight * ((sameCategory ? 4 : sameFamily ? 2 : 0) + (sameMaterial ? 1 : 0))
+    }, 0)}))
+    .filter(entry=>entry.score>0)
+    .sort((a,b)=>b.score-a.score || Number(Boolean(b.product.featured))-Number(Boolean(a.product.featured)))
+    .slice(0,4).map(entry=>entry.product)
+}
+
 function ProductDescription({product}) {
   const description = product.description?.trim() || product.short_description?.trim()
     || `${product.name} is part of the EROMA ${product.category_name || 'furniture'} collection.`
@@ -332,7 +358,11 @@ export default function App(){
   const couponRequest=useRef(0)
   const [searchLoading,setSearchLoading]=useState(false)
   const searchRequest=useRef(0)
-  const [recentlyViewed,setRecentlyViewed]=useState(()=>storedList('eroma_recently_viewed')), [openFaq,setOpenFaq]=useState(0)
+  const [viewHistory,setViewHistory]=useState({}), [openFaq,setOpenFaq]=useState(0)
+  const viewHistoryKey=user ? `eroma_recently_viewed_user_${user.id}` : 'eroma_recently_viewed'
+  const recentlyViewed=useMemo(()=>viewHistory[viewHistoryKey] ?? storedList(viewHistoryKey),[viewHistory,viewHistoryKey])
+  const personalised=useMemo(()=>personalisedProducts(products,categories,recentlyViewed,wishlistItems),
+    [products,categories,recentlyViewed,wishlistItems])
   const [storeLocations,setStoreLocations]=useState([]), [storeForm,setStoreForm]=useState({city:'',state:'',address:'',store_count:'',description:'',map_url:'',is_active:false}), [storeImage,setStoreImage]=useState(null)
   const [offers,setOffers]=useState([])
   const [availableCoupons,setAvailableCoupons]=useState([])
@@ -369,7 +399,7 @@ export default function App(){
   async function loadProfile(){try{const [p,a]=await Promise.all([api('/profile/'),api('/addresses/')]);setProfile(p);setAddresses(a);const saved=a.find(item=>item.is_default)||a[0];const profileName=[p.first_name,p.last_name].filter(Boolean).join(' ')||p.username||'';setForm(old=>({...old,full_name:old.full_name||saved?.full_name||profileName,email:old.email||p.email||'',phone:old.phone||savedContactValue('phone',saved?.phone)||savedContactValue('phone',p.phone),address:old.address||saved?.address||'',city:old.city||saved?.city||'',postal_code:old.postal_code||savedContactValue('postal_code',saved?.postal_code)}))}catch(e){setError(e.message)}}
   async function loadReviews(productId){try{setReviews(await api(`/reviews/?product=${productId}`))}catch(e){setReviews([])}}
   async function loadReviewEligibility(productId){if(!user){setReviewEligibility({productId,purchased:false,alreadyReviewed:false,loading:false});return}setReviewEligibility({productId,purchased:false,alreadyReviewed:false,loading:true});try{const result=await api(`/reviews/eligibility/?product=${productId}`);setReviewEligibility(current=>current.productId===productId?{productId,...result,loading:false}:current)}catch{setReviewEligibility(current=>current.productId===productId?{productId,purchased:false,alreadyReviewed:false,loading:false}:current)}}
-  function openProduct(product, colour){if(page==='detail'&&selected?.id!==product.id)rememberPage();setReviews([]);const cleanProduct={...product,name:productTitle(product.name)};setSelected(cleanProduct);setSelectedQuantity(0);const options=productColorOptions(cleanProduct);setSelectedColor(options.includes(colour)?colour:options[0]||'');setReviewForm({rating:5,body:''});loadReviewEligibility(product.id);const summary={id:product.id,name:cleanProduct.name,price:product.price,image_url:product.image_url,material:product.material,category_name:product.category_name,stock:product.stock,average_rating:product.average_rating,review_count:product.review_count,collective_rating:product.collective_rating,collective_review_count:product.collective_review_count,collective_is_sample:product.collective_is_sample};setRecentlyViewed(old=>{const next=[summary,...old.filter(item=>item.id!==product.id)].slice(0,8);localStorage.setItem('eroma_recently_viewed',JSON.stringify(next));return next});loadReviews(product.id);go('detail')}
+  function openProduct(product, colour){if(page==='detail'&&selected?.id!==product.id)rememberPage();setReviews([]);const cleanProduct={...product,name:productTitle(product.name)};setSelected(cleanProduct);setSelectedQuantity(0);const options=productColorOptions(cleanProduct);setSelectedColor(options.includes(colour)?colour:options[0]||'');setReviewForm({rating:5,body:''});loadReviewEligibility(product.id);const summary={id:product.id,name:cleanProduct.name,price:product.price,image_url:product.image_url,material:product.material,category_name:product.category_name,stock:product.stock,average_rating:product.average_rating,review_count:product.review_count,collective_rating:product.collective_rating,collective_review_count:product.collective_review_count,collective_is_sample:product.collective_is_sample};const nextViewed=[summary,...recentlyViewed.filter(item=>item.id!==product.id)].slice(0,8);setViewHistory(old=>({...old,[viewHistoryKey]:nextViewed}));try{localStorage.setItem(viewHistoryKey,JSON.stringify(nextViewed))}catch{};loadReviews(product.id);go('detail')}
   async function searchProducts(value=search) {
     const query = value.trim().replace(/\bdinning\b/gi, 'dining')
     const request = ++searchRequest.current
@@ -747,6 +777,7 @@ export default function App(){
     {page==='admin'&&isStaff&&<FooterContentAdmin pages={footerPages} onSaved={updated=>setFooterPages(old=>old.map(item=>item.id===updated.id?updated:item))}/>}
     {page==='shop'&&submittedSearch&&!searchLoading&&<section className="search-recommendations"><div className="section-title"><div><span className="eyebrow">SEARCH RESULTS  &mdash; {filtered.length} FOUND</span><h2>Results for <i>&ldquo;{submittedSearch}&rdquo;</i></h2></div></div>{!filtered.length&&<p className="search-empty">No products match this search. Try a broader term like sofa, table, or chair.</p>}<div className="section-title recommendation-title"><div><span className="eyebrow">PICKED FOR YOUR SEARCH</span><h2>More to <i>consider.</i></h2></div><span>{recommendationsLoading?'Finding good matches…':recommendationReason}</span></div>{!recommendationsLoading&&recommendedProducts.length>0?<ProductGrid products={recommendedProducts} onOpen={openProduct} onAdd={add} onWishlist={toggleWishlist} wishlistedIds={wishlistedIds} cart={cart} showCartStatus={false}/>:!recommendationsLoading&&<p className="search-empty">Explore these products, or try a different furniture style.</p>}</section>}
     {searchHistory.length>0&&<section className="search-history-banner"><div><span className="eyebrow">PICK UP WHERE YOU LEFT OFF</span><h2>Your recent <i>searches.</i></h2></div><div className="search-history-list">{searchHistory.map(query=><button key={query} onClick={()=>searchProducts(query)}><Search size={14}/>{query}<ArrowRight size={13}/></button>)}</div></section>}
+    {page==='home'&&personalised.length>0&&<section className="recently-viewed-banner" aria-labelledby="personalised-products-title"><div className="section-title"><h2 id="personalised-products-title">Recommended <i>for you</i></h2><span>Based on pieces you viewed or saved</span></div><ProductGrid products={personalised} onOpen={openProduct} onAdd={add} onWishlist={toggleWishlist} wishlistedIds={wishlistedIds} cart={cart}/></section>}
     {recentlyViewed.length>0&&<section className="recently-viewed-banner"><div className="section-title"><div><span className="eyebrow">A SECOND LOOK</span><h2>Recently <i>viewed.</i></h2></div><span>Pieces you explored on this device</span></div><ProductGrid products={recentlyViewed} onOpen={product=>{const fullProduct=products.find(item=>item.id===product.id)||product;openProduct(fullProduct)}} onAdd={product=>{const fullProduct=products.find(item=>item.id===product.id);if(fullProduct)add(fullProduct)}} onWishlist={product=>{const fullProduct=products.find(item=>item.id===product.id);if(fullProduct)toggleWishlist(fullProduct)}} wishlistedIds={wishlistedIds} cart={cart}/></section>}
     
     <section className="faq-banner"><div className="faq-heading"><span className="eyebrow">HERE WHEN YOU NEED US</span><h2>Questions, <i>answered.</i></h2><p>Quick help for choosing and caring for your EROMA pieces.</p></div><div className="faq-list">{commonFaqs.map((faq,index)=><article className={`faq-item ${openFaq===index?'open':''}`} key={faq.q}><button aria-expanded={openFaq===index} onClick={()=>setOpenFaq(openFaq===index?-1:index)}><span>{faq.q}</span><Plus size={16}/></button>{openFaq===index&&<p>{faq.a}</p>}</article>)}</div></section>

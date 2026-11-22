@@ -1,6 +1,6 @@
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import App, { BankOfferStrip, CartCouponOffers, getCheckoutAmounts, ProductColourPreview, ProductGrid } from './App'
 
 const product = {
@@ -73,6 +73,30 @@ describe('storefront flows', () => {
     expect(screen.getByRole('button', backButton)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', {name: 'EROMA home'}))
     expect(screen.queryByRole('button', backButton)).not.toBeInTheDocument()
+  })
+
+  it('recommends in-stock furniture from browsing history and wishlist preferences', async () => {
+    const viewed = {...sofa, category: 1}
+    const similar = {...sofa, id: 43, name: 'Cedar sofa', category: 1}
+    const unavailable = {...similar, id: 44, name: 'Birch sofa', stock: 0}
+    const saved = {...table, category: 2, material: 'Oak'}
+    const savedMatch = {...saved, id: 45, name: 'Oak side table'}
+    const unrelated = {...table, id: 46, name: 'Metal lamp', category: 3, material: 'Steel'}
+    localStorage.setItem('sofalux_access', 'test-token')
+    mockStore({
+      '/me/': {id: 1, username: 'shopper'},
+      '/products/': [viewed, similar, unavailable, saved, savedMatch, unrelated],
+      '/wishlist/': [{id: 1, product: saved}],
+    })
+    render(<App/>)
+    const shelf = {name: 'Recommended for you'}
+    expect(within(await screen.findByRole('region', shelf)).getByAltText('Oak side table')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: 'Shop All'}))
+    fireEvent.click(await screen.findByAltText('Luna sofa'))
+    fireEvent.click(screen.getByRole('button', {name: 'EROMA home'}))
+    const recommendations = within(screen.getByRole('region', shelf))
+    expect(recommendations.getAllByRole('img').map(image=>image.alt)).toEqual(['Oak side table', 'Cedar sofa'])
+    expect(JSON.parse(localStorage.getItem('eroma_recently_viewed_user_1'))[0].id).toBe(viewed.id)
   })
 
   it('shows progress and then the result count for a submitted search', async () => {
