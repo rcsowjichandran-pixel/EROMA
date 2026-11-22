@@ -170,20 +170,6 @@ function ProductDescription({product}) {
   </section>
 }
 
-function ProductFitGuide({dimensions}) {
-  return <details className="product-fit-guide detail-section">
-    <summary>Will it fit? Measuring guide</summary>
-    {dimensions?.trim()
-      ? <p><strong>Product dimensions</strong> {dimensions}</p>
-      : <p>Ask EROMA for the product and packaged dimensions before ordering.</p>}
-    <ol>
-      <li>Measure the floor space and allow room to walk around the furniture and open any doors or drawers.</li>
-      <li>Measure the narrowest doorway, hallway, stair turn, or lift on the delivery route.</li>
-      <li>Compare the room measurements with the product dimensions and the access route with the packaged dimensions.</li>
-    </ol>
-  </details>
-}
-
 export function ProductPhotoViewer({product, photo}) {
   const dialog = useRef(null)
   const [frame, setFrame] = useState(0)
@@ -775,7 +761,7 @@ export default function App(){
         <button type="button" className="darkbtn" disabled={!detailQuantity} onClick={()=>addFromDetail(true)}>Buy now <ArrowRight size={17}/></button>
       </div>
     </div></div>
-      <ProductDescription product={selected}/><ProductFitGuide key={selected.id} dimensions={selected.dimensions}/>
+      <ProductDescription product={selected}/>
       {relatedProducts.length>0&&<section className="detail-section detail-related" aria-labelledby="related-products-title">
         <h2 id="related-products-title">Related products</h2>
         <ProductGrid products={relatedProducts} onOpen={openProduct} onAdd={add} onWishlist={toggleWishlist} wishlistedIds={wishlistedIds} cart={cart}/>
