@@ -287,6 +287,37 @@ class CommerceApiTests(TestCase):
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password("NewSecurePassword123!"))
 
+    @override_settings(
+        DEBUG=False, RESEND_API_KEY="test-key", DEFAULT_FROM_EMAIL="EROMA <reset@example.com>",
+        FRONTEND_URL="https://eroma-1.onrender.com",
+    )
+    @patch("store.email_backend.requests.post")
+    def test_hosted_password_reset_sends_a_usable_link_over_https(self, send):
+        send.return_value.status_code = 200
+        guest = APIClient()
+        reset = guest.post("/api/auth/password-reset/", {"email": self.user.email}, format="json")
+        self.assertEqual(reset.status_code, 200, reset.data)
+        self.assertNotIn("development_reset_link", reset.data)
+        send.assert_called_once()
+        self.assertEqual(send.call_args.args, ("https://api.resend.com/emails",))
+        self.assertEqual(send.call_args.kwargs["headers"], {"Authorization": "Bearer test-key"})
+        payload = send.call_args.kwargs["json"]
+        self.assertEqual(payload["from"], "EROMA <reset@example.com>")
+        self.assertEqual(payload["to"], [self.user.email])
+        link = urlparse(payload["text"].split()[-1])
+        self.assertEqual((link.scheme, link.hostname), ("https", "eroma-1.onrender.com"))
+        uid, token = parse_qs(link.query)["reset"][0].split(".", 1)
+        confirmed = guest.post("/api/auth/password-reset/confirm/", {
+            "uid": uid, "token": token, "new_password": "NewSecurePassword123!",
+        }, format="json")
+        self.assertEqual(confirmed.status_code, 200, confirmed.data)
+
+        send.return_value.status_code = 403
+        with self.assertLogs("store.views", level="ERROR"):
+            rejected = guest.post("/api/auth/password-reset/", {"email": self.user.email}, format="json")
+        self.assertEqual(rejected.status_code, 503)
+        self.assertNotIn("development_reset_link", rejected.data)
+
     def test_admin_metrics_are_staff_only_and_report_live_catalog(self):
         denied = self.client.get("/api/admin/stats/")
         self.assertEqual(denied.status_code, 403)

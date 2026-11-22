@@ -34,7 +34,9 @@ Production security settings can be explicitly overridden with `SECURE_SSL_REDIR
 
 For local development, `EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend` prints reset messages to the Django terminal. With `DEBUG=True`, the password-reset endpoint also returns a development-only reset URL.
 
-For deployed password-reset emails, configure these on the backend service:
+For password reset on Render Free, set `RESEND_API_KEY`, `DEFAULT_FROM_EMAIL` (an address on your verified Resend domain), and `FRONTEND_URL=https://eroma-1.onrender.com` on the Python backend service. Keep `DEBUG=False`. A Resend key routes password reset emails through HTTPS, since Render Free blocks outbound SMTP on ports 25, 465, and 587. After deploying, request a reset using an account you control and follow the email link to confirm delivery and routing.
+
+If the backend can reach an SMTP provider and you prefer SMTP, leave `RESEND_API_KEY` empty and configure:
 
 - `EMAIL_HOST`, `EMAIL_PORT`
 - `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`

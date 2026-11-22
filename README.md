@@ -16,7 +16,7 @@ Included:
 
 Payment note: Razorpay Checkout is integrated and verifies payment details server-side. Use Razorpay test keys for project demonstrations. The simulated test-card method is development-only and never collects or processes card data. Configure live keys and payment webhooks before accepting production payments.
 
-Password reset shows a one-time reset link in local development. For deployed email delivery, set `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, TLS settings, `DEFAULT_FROM_EMAIL`, and `FRONTEND_URL` in the backend environment.
+Password reset shows a one-time reset link in local development. On Render Free, configure `RESEND_API_KEY`, `DEFAULT_FROM_EMAIL`, and `FRONTEND_URL` on the backend for HTTPS email delivery. See the [email setup instructions](docs/DEPLOYMENT_AND_HANDOFF.md#email) for Resend and SMTP configuration.
 
 ## Requirements
 - Python 3.11+

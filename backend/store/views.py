@@ -18,7 +18,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
-from django.core.mail import EmailMessage, send_mail
+from django.core.mail import EmailMessage, get_connection, send_mail
 from django.db import transaction
 from django.db.models import Sum, Q, F, Avg, Count, Max, Prefetch
 from django.http import FileResponse
@@ -1170,8 +1170,17 @@ class PasswordResetRequestView(APIView):
             frontend = getattr(settings, "FRONTEND_URL", "http://localhost:5173").rstrip("/")
             reset_link = f"{frontend}/?reset={uid}.{token}"
             try:
-                send_mail("Reset your EROMA password", f"Use this link to reset your password: {reset_link}",
-                          getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@eroma.in"), [user.email], fail_silently=False)
+                connection = (
+                    get_connection("store.email_backend.ResendEmailBackend")
+                    if settings.RESEND_API_KEY else None
+                )
+                sent = send_mail(
+                    "Reset your EROMA password",
+                    f"Use this link to reset your password: {reset_link}",
+                    settings.DEFAULT_FROM_EMAIL, [user.email], connection=connection,
+                )
+                if not sent:
+                    raise RuntimeError("Password reset email was not sent.")
             except Exception:
                 logger.exception("Unable to send password reset email")
                 return Response({"detail": "The password reset email service is unavailable right now. Please try again later or contact support."}, status=503)
