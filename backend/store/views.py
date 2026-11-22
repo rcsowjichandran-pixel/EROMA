@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 import re
 import time
+from collections import Counter
 from decimal import Decimal
 from rest_framework import generics, viewsets, permissions, status
 from rest_framework.decorators import action
@@ -26,6 +27,7 @@ from django.contrib.auth.tokens import default_token_generator
 from .models import Address, CallbackRequest, ContactMessage, Coupon, CouponRedemption, Product, ProductImage, ProductReview, Category, HomepageBanner, Order, OrderItem, UserProfile, WishlistItem, StoreLocation, Offer, FooterPageContent, SiteBranding
 from .serializers import AddressSerializer, RegisterSerializer, ProductSerializer, ProductImageSerializer, CategorySerializer, HomepageBannerSerializer, OrderSerializer, CreateOrderSerializer, ProductReviewSerializer, UserProfileSerializer, WishlistItemSerializer, OrderLineInputSerializer, StoreLocationSerializer, OfferBannerSerializer, FooterPageContentSerializer, SiteBrandingSerializer, coupon_category_ids
 from .permissions import IsStaffOrReadOnly
+from .contact_fields import PHONE_PATTERN, PIN_PATTERN, PHONE_ERROR, PIN_ERROR
 
 logger = logging.getLogger(__name__)
 
@@ -803,7 +805,9 @@ class ContactMessageView(APIView):
     def post(self, request):
         name = str(request.data.get("name", "")).strip()[:120]
         email = str(request.data.get("email", "")).strip()[:254]
-        phone = str(request.data.get("phone", "")).strip()[:40]
+        phone = str(request.data.get("phone", "")).strip()
+        if phone and not PHONE_PATTERN.fullmatch(phone):
+            return Response({"detail": PHONE_ERROR}, status=status.HTTP_400_BAD_REQUEST)
         message = str(request.data.get("message", "")).strip()[:4000]
         if not name or not email or len(message) < 10:
             return Response({"detail": "Please provide your name, email, and a message of at least 10 characters."}, status=400)
@@ -840,8 +844,8 @@ class CallbackRequestView(APIView):
     def post(self, request):
         name = str(request.data.get("name", "")).strip()[:120]
         email = str(request.data.get("email", "")).strip()[:254]
-        phone = str(request.data.get("phone", "")).strip()[:40]
-        postal_code = str(request.data.get("postal_code", "")).strip()[:12]
+        phone = str(request.data.get("phone", "")).strip()
+        postal_code = str(request.data.get("postal_code", "")).strip()
         city = str(request.data.get("city", "")).strip()[:100]
         message = str(request.data.get("message", "")).strip()[:2000]
 
@@ -855,8 +859,10 @@ class CallbackRequestView(APIView):
             validate_email(email)
         except Exception:
             return Response({"detail": "Enter a valid email address."}, status=status.HTTP_400_BAD_REQUEST)
-        if not re.fullmatch(r"\d{6}", postal_code):
-            return Response({"detail": "Enter a valid 6-digit PIN code."}, status=status.HTTP_400_BAD_REQUEST)
+        if not PHONE_PATTERN.fullmatch(phone):
+            return Response({"detail": PHONE_ERROR}, status=status.HTTP_400_BAD_REQUEST)
+        if not PIN_PATTERN.fullmatch(postal_code):
+            return Response({"detail": PIN_ERROR}, status=status.HTTP_400_BAD_REQUEST)
 
         callback = CallbackRequest.objects.create(
             name=name,
@@ -998,7 +1004,7 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
 
 
 class CouponValidationView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         code = str(request.data.get("code", "")).strip().upper()
@@ -1009,12 +1015,15 @@ class CouponValidationView(APIView):
         products = {p.id: p for p in Product.objects.filter(
             id__in=[line["product_id"] for line in lines.validated_data], status="active"
         )}
-        subtotal = 0
+        quantities = Counter()
         for line in lines.validated_data:
-            product = products.get(line["product_id"])
-            if not product or product.stock < line["quantity"]:
+            quantities[line["product_id"]] += line["quantity"]
+        subtotal = 0
+        for product_id, quantity in quantities.items():
+            product = products.get(product_id)
+            if not product or product.stock < quantity:
                 return Response({"detail": "A product is unavailable or no longer has enough stock."}, status=400)
-            subtotal += product.price * line["quantity"]
+            subtotal += product.price * quantity
         try:
             coupon = Coupon.objects.get(code=code, is_active=True)
         except Coupon.DoesNotExist:

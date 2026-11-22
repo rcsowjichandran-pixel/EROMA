@@ -1,5 +1,7 @@
 from django.contrib.auth.models import User
+from django.utils import timezone
 from rest_framework import serializers
+from .contact_fields import PHONE_PATTERN, PIN_PATTERN, PHONE_ERROR, PIN_ERROR
 from .models import Address, Category, CategoryImage, HomepageBanner, Product, ProductImage, Order, OrderItem, ProductReview, UserProfile, WishlistItem, StoreLocation, Offer, FooterPageContent, SiteBranding
 
 
@@ -60,6 +62,20 @@ class OfferBannerSerializer(serializers.ModelSerializer):
     coupon_discount_value = serializers.DecimalField(source="coupon.discount_value", max_digits=8, decimal_places=2, read_only=True, allow_null=True)
     coupon_discount_type = serializers.CharField(source="coupon.discount_type", read_only=True, allow_null=True)
     coupon_minimum_order = serializers.DecimalField(source="coupon.minimum_order", max_digits=10, decimal_places=2, read_only=True, allow_null=True)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        coupon = instance.coupon
+        now = timezone.now()
+        if coupon and (
+            not coupon.is_active
+            or (coupon.starts_at and coupon.starts_at > now)
+            or (coupon.ends_at and coupon.ends_at < now)
+            or (coupon.usage_limit is not None and coupon.redemptions.count() >= coupon.usage_limit)
+        ):
+            for name in ("coupon_code", "coupon_discount_value", "coupon_discount_type", "coupon_minimum_order"):
+                data[name] = None
+        return data
 
     class Meta:
         model = Offer
@@ -130,6 +146,9 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class AddressSerializer(serializers.ModelSerializer):
+    phone = serializers.RegexField(PHONE_PATTERN, error_messages={"invalid": PHONE_ERROR})
+    postal_code = serializers.RegexField(PIN_PATTERN, error_messages={"invalid": PIN_ERROR})
+
     class Meta:
         model = Address
         exclude = ("user",)
@@ -142,7 +161,7 @@ class UserProfileSerializer(serializers.Serializer):
     email = serializers.EmailField(allow_blank=True)
     first_name = serializers.CharField(max_length=150, allow_blank=True, required=False)
     last_name = serializers.CharField(max_length=150, allow_blank=True, required=False)
-    phone = serializers.CharField(max_length=20, allow_blank=True, required=False)
+    phone = serializers.RegexField(PHONE_PATTERN, allow_blank=True, required=False, error_messages={"invalid": PHONE_ERROR})
     is_staff = serializers.BooleanField(read_only=True)
 
     def validate_username(self, value):
@@ -236,10 +255,10 @@ class OrderLineInputSerializer(serializers.Serializer):
 class CreateOrderSerializer(serializers.Serializer):
     full_name = serializers.CharField(max_length=150)
     email = serializers.EmailField()
-    phone = serializers.CharField(max_length=20)
+    phone = serializers.RegexField(PHONE_PATTERN, error_messages={"invalid": PHONE_ERROR})
     address = serializers.CharField()
     city = serializers.CharField(max_length=100)
-    postal_code = serializers.CharField(max_length=12)
+    postal_code = serializers.RegexField(PIN_PATTERN, error_messages={"invalid": PIN_ERROR})
     payment_method = serializers.ChoiceField(choices=["cod", "razorpay", "test_card"], default="cod")
     coupon_code = serializers.CharField(max_length=40, allow_blank=True, required=False)
     items = OrderLineInputSerializer(many=True, allow_empty=False)

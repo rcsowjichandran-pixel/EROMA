@@ -1,7 +1,7 @@
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { BankOfferStrip, CartCouponOffers, openWhatsAppChat, ProductColourPreview, ProductGrid } from './App'
+import App, { BankOfferStrip, CartCouponOffers, openWhatsAppChat, ProductColourPreview, ProductGrid } from './App'
 
 const product = {
   id: 41,
@@ -16,6 +16,65 @@ const product = {
 }
 
 afterEach(cleanup)
+
+describe('storefront flows', () => {
+  const sofa = {...product, status: 'active'}
+  const table = {...product, id: 42, name: 'Oak table', regular_price: '0', status: 'active'}
+
+  function mockStore(endpoints = {}) {
+    vi.stubGlobal('matchMedia', () => ({matches: false}))
+    vi.stubGlobal('scrollTo', vi.fn())
+    vi.stubGlobal('fetch', vi.fn(async url => {
+      const {pathname, search} = new URL(url)
+      const route = pathname.replace(/^\/api/, '') + search
+      const data = endpoints[route] ?? (route === '/products/' ? [sofa, table] : [])
+      return {ok: true, status: 200, json: async () => await data}
+    }))
+  }
+
+  afterEach(() => {
+    localStorage.clear()
+    vi.unstubAllGlobals()
+  })
+
+  it('filters Spot Deals to products with a markdown', async () => {
+    mockStore()
+    render(<App/>)
+    await screen.findByText('Up to 9% off')
+    fireEvent.click(screen.getByRole('button', {name: 'Shop spot deals'}))
+    expect(screen.getByRole('checkbox', {name: 'On sale'})).toBeChecked()
+    expect(screen.getByText('1 piece found')).toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: 'Add Oak table to bag'})).toBeNull()
+  })
+
+  it('shows progress and then the result count for a submitted search', async () => {
+    let finishSearch
+    mockStore({'/products/?search=sofa': new Promise(resolve => {finishSearch = resolve})})
+    render(<App/>)
+    const search = screen.getByRole('textbox', {name: 'Search furniture'})
+    fireEvent.change(search, {target: {value: 'sofa'}})
+    fireEvent.submit(screen.getByRole('search'))
+    expect(screen.getAllByText(/Searching for sofa/).length).toBeGreaterThan(0)
+    finishSearch([sofa])
+    expect(await screen.findByText('1 piece found for sofa')).toBeInTheDocument()
+  })
+
+  it('fills signed-in checkout from the default saved address', async () => {
+    localStorage.setItem('sofalux_access', 'test-token')
+    localStorage.setItem('eroma_cart_user_1', JSON.stringify([{...sofa, quantity: 1}]))
+    mockStore({
+      '/me/': {id: 1, username: 'shopper'},
+      '/profile/': {first_name: 'Luna', email: 'luna@example.com', phone: '9999999999'},
+      '/addresses/': [{id: 1, label: 'Home', full_name: 'Luna Shopper', city: 'Mumbai', address: '10 Test Street', phone: '9876543210', postal_code: '400001', is_default: true}],
+    })
+    render(<App/>)
+    fireEvent.click(await screen.findByRole('button', {name: 'Shopping bag: 1 items'}))
+    expect(await screen.findByDisplayValue('10 Test Street')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Email')).toHaveValue('luna@example.com')
+    expect(screen.getByPlaceholderText('Phone')).toHaveValue('9876543210')
+    expect(screen.getByPlaceholderText('Postal code')).toHaveValue('400001')
+  })
+})
 
 it('opens the catalog when the bank name is clicked and exposes each offer once', () => {
   const onShop = vi.fn()

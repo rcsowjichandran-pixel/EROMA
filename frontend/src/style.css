@@ -767,6 +767,15 @@ main :is(input,select,textarea){font-size:max(13px,1em)}
 .sofa-photo-caption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin-top: 8px; color: #75695e; font-size: 12px; }
 .sofa-photo-caption small { font-size: inherit; }
 .sofa-photo-caption button { padding: 0; border: 0; color: #653d28; background: none; text-decoration: underline; cursor: pointer; }
+.product-photo-viewer-trigger { margin-top: 10px; }
+.product-photo-viewer { width: min(92vw, 880px); max-height: 92dvh; padding: 16px; border: 1px solid #d9c5b1; border-radius: 10px; background: #fffaf4; color: #433025; }
+.product-photo-viewer::backdrop { background: #211811b8; }
+.product-photo-viewer > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.product-photo-viewer h2 { margin: 0 0 8px; font: 600 20px 'Playfair Display', serif; }
+.product-photo-viewer img { display: block; width: 100%; max-height: 70dvh; object-fit: contain; }
+.product-photo-viewer button { display: grid; place-items: center; border: 0; padding: 8px; background: none; color: inherit; cursor: pointer; }
+.product-photo-controls input { width: min(70%, 420px); accent-color: #84452b; }
+.product-photo-viewer small { display: block; margin-top: 8px; }
 
 .hero-carousel-sparkles {
   position: absolute;

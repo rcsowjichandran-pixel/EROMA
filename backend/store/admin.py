@@ -230,7 +230,10 @@ class ProductImageInline(admin.TabularInline):
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         field = super().formfield_for_dbfield(db_field, request, **kwargs)
         if db_field.name == "alt_text":
-            field.help_text = "For a colour-specific product photo, enter Colour: Olive (use the exact configured colour name)."
+            field.help_text = (
+                "For a colour-specific photo, enter Colour: Olive with the configured colour name. "
+                "For a rotation photo, enter 360: 45 with the angle in degrees. Use at least eight evenly spaced angles."
+            )
         return field
 
 

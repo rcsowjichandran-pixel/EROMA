@@ -52,6 +52,39 @@ class CommerceApiTests(TestCase):
         self.assertEqual(self.product.stock, 5)
         self.assertEqual(Order.objects.count(), 0)
 
+    def test_guest_can_quote_home_coupon_only_on_eligible_products(self):
+        home = Category.objects.create(name="Home Decor", slug="home-decor")
+        lamps = Category.objects.create(name="Lamps", slug="lamps", parent=home)
+        lamp = Product.objects.create(name="Lamp", slug="lamp", category=lamps, price=6000, stock=2)
+        coupon = Coupon.objects.create(code="HOME600", discount_type="fixed", discount_value=600, minimum_order=5000)
+        coupon.categories.add(home)
+        guest = APIClient()
+
+        response = guest.post("/api/coupons/validate/", {
+            "code": coupon.code, "items": [{"product_id": lamp.id, "quantity": 1}],
+        }, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["discount"], Decimal("600.00"))
+
+        response = guest.post("/api/coupons/validate/", {
+            "code": coupon.code, "items": [{"product_id": self.product.id, "quantity": 1}],
+        }, format="json")
+        self.assertEqual(response.status_code, 400, response.data)
+
+    def test_order_and_callback_reject_bad_phone_and_pin(self):
+        payload = self.order_payload(phone="12345678901", postal_code="40001")
+        order = self.client.post("/api/orders/", payload, format="json")
+        self.assertEqual(order.status_code, 400, order.data)
+        self.assertIn("phone", order.data)
+        self.assertIn("postal_code", order.data)
+
+        callback = self.client.post("/api/callback-requests/", {
+            "name": payload["full_name"], "email": payload["email"], "phone": payload["phone"],
+            "postal_code": "400001", "message": "Please call me about a sofa.",
+        }, format="json")
+        self.assertEqual(callback.status_code, 400, callback.data)
+        self.assertIn("10-digit", callback.data["detail"])
+
     @override_settings(DEBUG=True)
     def test_test_payment_is_simulated_as_paid_in_debug(self):
         response = self.client.post("/api/orders/", self.order_payload(payment_method="test_card"), format="json")

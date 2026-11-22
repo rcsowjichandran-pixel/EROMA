@@ -5,6 +5,8 @@ from django.contrib.auth.models import User
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.core.exceptions import ValidationError
 
+from .contact_fields import validate_phone, validate_pin
+
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
     slug = models.SlugField(unique=True)
@@ -156,7 +158,7 @@ class FooterPageContent(models.Model):
 
 class SiteBranding(models.Model):
     logo = models.ImageField(upload_to="branding/", blank=True)
-    logo_alt_text = models.CharField(max_length=180, default="EROMA Furniture — Elegence in Every Corner")
+    logo_alt_text = models.CharField(max_length=180, default="EROMA Furniture — Elegance in Every Corner")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -224,7 +226,7 @@ class ProductReview(models.Model):
 
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="store_profile")
-    phone = models.CharField(max_length=20, blank=True)
+    phone = models.CharField(max_length=20, blank=True, validators=[validate_phone])
 
     def __str__(self):
         return f"{self.user.username} profile"
@@ -234,10 +236,10 @@ class Address(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="addresses")
     label = models.CharField(max_length=60, default="Home")
     full_name = models.CharField(max_length=150)
-    phone = models.CharField(max_length=20)
+    phone = models.CharField(max_length=20, validators=[validate_phone])
     address = models.TextField()
     city = models.CharField(max_length=100)
-    postal_code = models.CharField(max_length=12)
+    postal_code = models.CharField(max_length=12, validators=[validate_pin])
     is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -356,10 +358,10 @@ class Order(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="orders")
     full_name = models.CharField(max_length=150)
     email = models.EmailField()
-    phone = models.CharField(max_length=20)
+    phone = models.CharField(max_length=20, validators=[validate_phone])
     address = models.TextField()
     city = models.CharField(max_length=100)
-    postal_code = models.CharField(max_length=12)
+    postal_code = models.CharField(max_length=12, validators=[validate_pin])
     payment_method = models.CharField(max_length=20, choices=PAYMENT_CHOICES, default="cod")
     razorpay_order_id = models.CharField(max_length=64, blank=True)
     razorpay_payment_id = models.CharField(max_length=64, blank=True)
@@ -398,8 +400,8 @@ class CallbackRequest(models.Model):
 
     name = models.CharField(max_length=120)
     email = models.EmailField()
-    phone = models.CharField(max_length=40)
-    postal_code = models.CharField(max_length=12)
+    phone = models.CharField(max_length=40, validators=[validate_phone])
+    postal_code = models.CharField(max_length=12, validators=[validate_pin])
     city = models.CharField(max_length=100, blank=True)
     message = models.TextField(max_length=2000)
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="new")
@@ -417,7 +419,7 @@ class ContactMessage(models.Model):
 
     name = models.CharField(max_length=120)
     email = models.EmailField()
-    phone = models.CharField(max_length=40, blank=True)
+    phone = models.CharField(max_length=40, blank=True, validators=[validate_phone])
     message = models.TextField(max_length=4000)
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="new")
     notification_sent = models.BooleanField(default=False)
