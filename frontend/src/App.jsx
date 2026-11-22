@@ -674,9 +674,9 @@ export default function App(){
   return <div className="app">
     <BankOfferStrip onShop={()=>{setNavDropdownClosed(false);searchProducts('')}}/>
     <div className="topline">
-      <span className="topline-promise"><Truck size={18}/><span className="topline-pulse">Where elegance find its place!</span></span>
-      <span className="topline-delivery"><Gift size={18}/><span className="topline-pulse">Complimentary delivery on selected pieces</span></span>
-      <button type="button" onClick={openTrackOrder}><MapPin size={17}/><span className="topline-pulse">Track an order</span><ArrowRight size={15}/></button>
+      <span className="topline-promise"><Truck className="topline-icon" size={18}/><span>Where elegance find its place!</span></span>
+      <span className="topline-delivery"><Gift className="topline-icon" size={18}/><span>Complimentary delivery on selected pieces</span></span>
+      <button type="button" onClick={openTrackOrder}><MapPin className="topline-icon" size={17}/><span>Track an order</span><ArrowRight size={15}/></button>
     </div>
     <header className="nav">
       <div className="nav-main"><button type="button" className="brand" onClick={()=>go('home')} aria-label="EROMA home"><img className="brand-logo-image" src="/images/eroma-logo.png" alt="EROMA Furniture � Elegance in Every Corner"/></button>

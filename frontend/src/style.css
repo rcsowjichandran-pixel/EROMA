@@ -641,18 +641,16 @@ main :is(input,select,textarea){font-size:max(13px,1em)}
 /* Brand image sits at the left; the delivery PIN checker stays on the true center line. */
 .topline,.nav,.nav-main,.category-nav{background:#fff7ed!important;color:#432d20!important}
 .topline{border-color:#e8d5c1!important}
-.topline-pulse { animation: topline-blink 6s ease-in-out infinite; }
-.topline-delivery .topline-pulse { animation-delay: -4s; }
-.topline button .topline-pulse { animation-delay: -2s; }
-.topline button:is(:hover,:focus-visible) .topline-pulse { animation: none; }
-@keyframes topline-blink {
-  0%, 33%, 100% { opacity: 1; color: inherit; }
-  8% { opacity: .68; }
-  16% { opacity: 1; color: #a14a27; text-shadow: 0 0 7px #dca47a66; }
-  24% { opacity: .8; }
+@media (prefers-reduced-motion: no-preference) {
+  .topline-icon { animation: topline-icon-pulse 4.8s ease-in-out infinite; }
+  .topline-delivery .topline-icon { animation-delay: -3.2s; }
+  .topline button .topline-icon { animation-delay: -1.6s; }
+  .topline button:is(:hover, :focus-visible) .topline-icon { animation: none; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .topline-pulse { animation: none; }
+@keyframes topline-icon-pulse {
+  0%, 25%, 100% { opacity: 1; transform: scale(1); }
+  7% { opacity: .5; transform: scale(.94); }
+  15% { opacity: 1; transform: scale(1.18); filter: drop-shadow(0 0 4px #b9623e99); }
 }
 .nav-main{height:146px!important;min-height:146px!important;grid-template-columns:minmax(0,1fr) minmax(320px,420px) minmax(0,1fr)!important;column-gap:clamp(16px,2vw,34px)!important}
 .brand{grid-column:1;justify-self:start!important;position:relative;overflow:hidden;min-width:0!important;width:max-content!important;max-width:100%;padding:4px!important;border-radius:10px;transition:transform .35s ease,filter .35s ease}
