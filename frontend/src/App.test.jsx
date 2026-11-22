@@ -1,7 +1,7 @@
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { CartCouponOffers, openWhatsAppChat, ProductGrid } from './App'
+import { BankOfferStrip, CartCouponOffers, openWhatsAppChat, ProductColourPreview, ProductGrid } from './App'
 
 const product = {
   id: 41,
@@ -16,6 +16,50 @@ const product = {
 }
 
 afterEach(cleanup)
+
+it('opens the catalog when the bank name is clicked and exposes each offer once', () => {
+  const onShop = vi.fn()
+  render(<BankOfferStrip onShop={onShop}/>)
+  const axisOffer = screen.getByRole('button', {name: /Axis Bank/})
+  fireEvent.click(axisOffer.querySelector('b'))
+  expect(onShop).toHaveBeenCalledOnce()
+})
+
+describe('ProductColourPreview', () => {
+  it('previews the selected upholstery on the model photo and prefers a matching variant', () => {
+    const sofa = {...product, image_url: '/media/3_Seater.jpeg', images: [{image: '/media/luna-olive.jpg', alt_text: 'Colour: Olive'}]}
+    function DetailMedia() {
+      const [colour, setColour] = React.useState('Ivory')
+      return <ProductColourPreview product={sofa} photo={sofa.image_url} colour={colour} onChange={setColour}/>
+    }
+
+    render(<DetailMedia />)
+    expect(screen.getByAltText('Luna sofa')).toHaveAttribute('src', sofa.image_url)
+    expect(screen.queryByText('Approximate upholstery colour')).toBeNull()
+    fireEvent.click(screen.getByRole('button', {name: 'Choose Charcoal'}))
+    expect(screen.getByRole('button', {name: 'Choose Charcoal'})).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByAltText('Luna sofa, approximate Charcoal upholstery preview')).toHaveAttribute('src', sofa.image_url)
+    fireEvent.click(screen.getByRole('button', {name: 'Show original photo'}))
+    expect(screen.getByAltText('Luna sofa')).toHaveAttribute('src', sofa.image_url)
+    expect(screen.getByRole('button', {name: 'Choose Charcoal'})).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', {name: 'Choose Olive'}))
+    expect(screen.getByAltText('Luna sofa in Olive')).toHaveAttribute('src', '/media/luna-olive.jpg')
+    expect(screen.queryByText('Approximate upholstery colour')).toBeNull()
+  })
+
+  it('uses a different photo and upholstery outline for a different model', () => {
+    const onChange = vi.fn()
+    const {container, rerender} = render(<ProductColourPreview product={product} photo="/media/3_Seater.jpeg" colour="Olive" onChange={onChange}/>)
+    fireEvent.click(screen.getByRole('button', {name: 'Choose Olive'}))
+    const firstOutline = container.querySelector('.sofa-photo-tint').style.clipPath
+    rerender(<ProductColourPreview product={{...product, name: 'L-shaped sofa'}} photo="/media/L_shape.jpeg" colour="Olive" onChange={onChange}/>)
+    expect(screen.getByAltText('L-shaped sofa')).toHaveAttribute('src', '/media/L_shape.jpeg')
+    fireEvent.click(screen.getByRole('button', {name: 'Choose Olive'}))
+    expect(screen.getByAltText('L-shaped sofa, approximate Olive upholstery preview')).toHaveAttribute('src', '/media/L_shape.jpeg')
+    expect(container.querySelector('.sofa-photo-tint').style.clipPath).not.toBe(firstOutline)
+  })
+})
 
 describe('ProductGrid', () => {
   it('shows the product price and calls the product detail handler', () => {

@@ -227,6 +227,12 @@ class ProductImageInline(admin.TabularInline):
     extra = 1
     fields = ("image", "alt_text", "is_primary", "sort_order")
 
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        field = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == "alt_text":
+            field.help_text = "For a colour-specific product photo, enter Colour: Olive (use the exact configured colour name)."
+        return field
+
 
 @admin.register(Product, site=admin_site)
 class ProductAdmin(admin.ModelAdmin):

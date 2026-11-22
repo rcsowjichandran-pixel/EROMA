@@ -419,6 +419,9 @@ class StoreChatView(APIView):
         recommendation_intent = any(phrase in latest for phrase in (
             "recommend", "suggest", "show me", "find me", "looking for", "available options", "browse", "shop for", "do you have", "in stock"
         ))
+        room_colour_question = bool(
+            re.search(r"\bcolou?rs?\b", latest) and re.search(r"\b(rooms?|walls?)\b", latest)
+        )
         support_reply = None
         if any(phrase in latest for phrase in ("return", "returns", "refund", "exchange")):
             support_reply = (
@@ -481,7 +484,20 @@ class StoreChatView(APIView):
             "recliner": ("recliner",), "desk": ("desk", "office"),
         }
         matched_terms = next((terms for word, terms in product_terms.items() if word in latest), ())
-        if matched_terms and recommendation_intent and not material_comparison and not care_question:
+        if room_colour_question:
+            if re.search(r"\b(lavender|lilac|light purple|pale purple)\b", latest):
+                fallback = (
+                    "For a light purple room, try an oatmeal or warm ivory sofa or chaise and a light oak bed frame. "
+                    "For an upholstered headboard, choose warm ivory or soft beige. Add sage-green cushions or a throw for gentle contrast. "
+                    "If you prefer a cooler palette, pair a soft grey lounge with a charcoal headboard."
+                )
+            else:
+                fallback = (
+                    "Warm ivory, oatmeal and light oak are good starting points for furniture in a room with coloured walls. "
+                    "Use cushions or bedding to echo the wall colour, and compare fabric samples against the wall in daylight. "
+                    "What shade are your walls? I can suggest a more specific pairing."
+                )
+        elif matched_terms and recommendation_intent and not material_comparison and not care_question:
             matches = Product.objects.filter(status="active", stock__gt=0).filter(
                 Q(category__name__icontains=matched_terms[0]) | Q(name__icontains=matched_terms[0])
             ).order_by("-featured", "-best_seller", "name")[:3]
@@ -522,6 +538,9 @@ class StoreChatView(APIView):
 
         instructions = (
             "You are Eri, EROMA's friendly, lively furniture guide. Answer the customer's actual question directly and naturally, using earlier turns for follow-ups. "
+            "Infer obvious typos from context. If a customer asks you to tell or write a 'poet' about furniture, treat it as a request for a poem. "
+            "For creative requests about furniture or homes, lead with the requested creative work. Only add shopping advice or specific products if the customer asks for them. "
+            "Use plain text and line breaks for formatting, without Markdown emphasis or bullets made of asterisks. "
             "You can explain furniture materials (including leather, fabric, velvet, wood, engineered wood, foam, and upholstery), compare trade-offs, suggest care and cleaning, "
             "help with room planning, measurements, seating, styles, and choosing furniture for a budget. General furniture knowledge is allowed; label it as general guidance "
             "and do not present it as an EROMA product specification. For EROMA products, prices, stock, colors, dimensions, materials, warranty, current offers, coupons, "
