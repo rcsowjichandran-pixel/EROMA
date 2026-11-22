@@ -1,6 +1,9 @@
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from rest_framework import serializers
+from .checkout_amounts import checkout_amounts, coupon_discount
 from .contact_fields import PHONE_PATTERN, PIN_PATTERN, PHONE_ERROR, PIN_ERROR
 from .models import Address, Category, CategoryImage, HomepageBanner, Product, ProductImage, Order, OrderItem, ProductReview, UserProfile, WishlistItem, StoreLocation, Offer, FooterPageContent, SiteBranding
 
@@ -17,6 +20,15 @@ class RegisterSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ("id", "username", "email", "password")
+
+    def validate(self, attrs):
+        customer = User(username=attrs["username"], email=attrs.get("email", ""))
+        try:
+            validate_password(attrs["password"], user=customer)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({"password": error.messages}) from error
+        return attrs
+
     def create(self, validated_data):
         return User.objects.create_user(**validated_data)
 
@@ -136,8 +148,9 @@ class ProductSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         images = list(instance.images.all())
-        primary_image = next((image for image in images if image.is_primary), None)
-        primary_image = primary_image or next((image for image in images if image.image), None)
+        primary_image = next((image for image in images if image.is_primary and image.image), None)
+        if not primary_image and not data["image_url"]:
+            primary_image = next((image for image in images if image.image), None)
         if primary_image and primary_image.image:
             image_url = primary_image.image.url
             request = self.context.get("request")
@@ -271,7 +284,6 @@ class CreateOrderSerializer(serializers.Serializer):
 
     def create(self, validated):
         from django.db import transaction
-        from django.conf import settings
         from decimal import Decimal
         from django.utils import timezone
         from .models import Coupon, CouponRedemption
@@ -281,7 +293,8 @@ class CreateOrderSerializer(serializers.Serializer):
             for row in validated["items"]:
                 quantities[row["product_id"]] = quantities.get(row["product_id"], 0) + row["quantity"]
             products = {}
-            for product_id, quantity in quantities.items():
+            for product_id in sorted(quantities):
+                quantity = quantities[product_id]
                 try:
                     product = Product.objects.select_for_update().get(pk=product_id, status="active")
                 except Product.DoesNotExist:
@@ -329,22 +342,9 @@ class CreateOrderSerializer(serializers.Serializer):
                     raise serializers.ValidationError({"coupon_code": f"Minimum order is ₹{coupon.minimum_order}."})
                 if coupon.usage_limit is not None and coupon.redemptions.count() >= coupon.usage_limit:
                     raise serializers.ValidationError({"coupon_code": "This coupon has reached its usage limit."})
-                if coupon.discount_type == "percent":
-                    discount = (eligible_total * coupon.discount_value / Decimal("100")).quantize(Decimal("0.01"))
-                else:
-                    discount = coupon.discount_value
-                discount = min(discount, eligible_total)
+                discount = coupon_discount(coupon, eligible_total)
 
-            discounted_subtotal = max(Decimal("0.00"), total - discount)
-            tax_rate = settings.ORDER_GST_RATE
-            tax_amount = (
-                (discounted_subtotal * tax_rate / (Decimal("100.00") + tax_rate)).quantize(Decimal("0.01"))
-                if tax_rate > 0 else Decimal("0.00")
-            )
-            shipping_amount = (
-                Decimal("0.00") if discounted_subtotal >= settings.ORDER_FREE_DELIVERY_THRESHOLD
-                else settings.ORDER_STANDARD_DELIVERY_FEE
-            )
+            tax_amount, shipping_amount, payable_total = checkout_amounts(total, discount)
 
             order = Order.objects.create(
                 user=self.context["request"].user,
@@ -353,7 +353,7 @@ class CreateOrderSerializer(serializers.Serializer):
                 payment_method=validated.get("payment_method", "cod"),
                 payment_status="paid" if validated.get("payment_method") == "test_card" else "pending",
                 coupon=coupon, discount_amount=discount, tax_amount=tax_amount,
-                shipping_amount=shipping_amount, total=discounted_subtotal + shipping_amount,
+                shipping_amount=shipping_amount, total=payable_total,
             )
             # Order rows are written after the order exists to preserve FK consistency.
             for row in validated["items"]:

@@ -16,6 +16,14 @@ npm run build
 
 `manage.py check --deploy` also checks production security settings. The project enables HTTPS redirect, HSTS, and secure cookies by default when `DEBUG=False`. Set a unique `SECRET_KEY` of at least 50 random characters in the backend service environment. Do not copy it into source control or a `VITE_` variable.
 
+## Submission verification
+
+- Django and frontend automated suites cover registration validation, password reset, inventory, checkout totals, coupons, protected admin statistics, gallery uploads, session refresh, and payment outcomes.
+- Chromium checks against an isolated Django database covered registration, sign-out, password reset through a local email inbox, COD and order history, controlled success/failure payment callbacks, and a persisted admin inventory edit. A mobile-viewport check verified session renewal and the Admin Studio link to the configured backend.
+- Razorpay's official test-mode checkout was exercised in Chromium with its mock bank. Both the successful payment and the failed attempt returned the expected storefront result. The test used only sandbox credentials and an isolated database.
+- All 48 category cover URLs returned HTTP 200 locally. The sanitized fixture restored into a clean migrated SQLite database with 664 catalog records and 382 referenced local media files. The restored database passed SQLite integrity checks.
+- Hosted SMTP delivery and operations against Render PostgreSQL require verification from the deployed service environment. The local browser checks use an isolated email backend and SQLite.
+
 ## Render environment
 
 Set secrets on the **EROMA Python backend service**, not the frontend service. Keep `DATABASE_URL`, `SECRET_KEY`, Gemini and Razorpay secrets, SMTP credentials, and object-storage credentials in Render's backend Environment settings. The frontend needs only `VITE_API_URL`, set to the public backend API base ending in `/api`.
@@ -53,6 +61,19 @@ The bucket must allow public reads for the furniture images displayed on product
 
 Migrations are the repeatable schema source; `backend/db.sqlite3` is deliberately excluded from Git. A complete live database backup can contain customer addresses, order history, emails, and password hashes, so keep it private and out of GitHub.
 
+### Submission archive
+
+The submission archive contains the project source, catalog media, a UTF-8 fixture at `database/eroma-catalog.json`, and a ready-to-use SQLite database at `database/eroma-demo.sqlite3`. The database contains catalog and storefront content. Create your own admin account. Customer accounts, reviews, wishlists, carts, addresses, orders, payment records, and contact messages are excluded.
+
+For a clean checkout, use one of these two setup paths with `DATABASE_URL` blank for local SQLite:
+
+- Copy `database/eroma-demo.sqlite3` to `backend/db.sqlite3` before running migrations in an empty project folder.
+- Run migrations on a blank database, then run `python manage.py loaddata ../database/eroma-catalog.json` from `backend`. This fixture can also be loaded into an empty migrated PostgreSQL database.
+
+Keep the bundled `backend/media` folder in place. One original catalog product uses an externally hosted image URL and needs an internet connection to load that image. An inactive banner with missing artwork was omitted from the handoff.
+
+### Catalog export instructions
+
 To export the product catalogue for a clean database handoff, run from `backend` after `DATABASE_URL` points at the intended database:
 
 ```powershell
@@ -74,4 +95,4 @@ Razorpay Checkout and server-side payment verification are implemented. Use test
 
 ## WhatsApp contact
 
-The EROMA-styled chat gathers a message on the site and opens a prefilled WhatsApp conversation to `VITE_WHATSAPP_NUMBER`. The customer must press Send in WhatsApp. The destination number must be registered with WhatsApp; the display name shown inside WhatsApp is controlled by that account's WhatsApp profile, not by the website.
+The floating WhatsApp link and the Contact Us link open WhatsApp Web in a new tab for `VITE_WHATSAPP_NUMBER`. Set this value to the registered WhatsApp number with its country code. Customers compose and send their messages in WhatsApp Web.

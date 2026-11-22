@@ -20,7 +20,7 @@ Password reset shows a one-time reset link in local development. For deployed em
 
 ## Requirements
 - Python 3.11+
-- Node.js 20+
+- Node.js 20.19 or later in the 20.x series, or Node.js 22.12 or later
 - PostgreSQL 15+ (optional for first local run; SQLite is used if DATABASE_URL is not set)
 
 ## Backend — Windows PowerShell
@@ -50,7 +50,7 @@ Django admin: http://127.0.0.1:8000/admin/
 ## Frontend — second PowerShell window
 ```powershell
 cd sofalux\frontend
-npm install
+npm ci
 Copy-Item .env.example .env
 npm run dev
 ```
@@ -73,7 +73,7 @@ Never commit `.env` or expose `SECRET_KEY` / database credentials.
 Use Django admin at `/admin/` and add categories/products. Upload product and category photos through the staff tools or Django admin. Files are stored under `backend/media/` locally. Configure durable object storage for deployment.
 
 ## Admin access
-Create a superuser using `python manage.py createsuperuser`. Staff/superusers can access Django admin and the React `/admin` screen. Django admin provides full product, category, stock, order, user, review, coupon, and content management. The React admin screen provides dashboard metrics, product creation, and product photo uploads. Protect staff accounts carefully.
+Create a superuser using `python manage.py createsuperuser`. Staff can open Admin Studio from their storefront account menu, or sign in to Django admin. Django admin provides product, category, stock, order, user, review, coupon, and content management. Admin Studio provides dashboard metrics, product creation, and product photo uploads. Protect staff accounts carefully.
 
 ## API endpoints
 - `POST /api/auth/register/`
@@ -87,7 +87,7 @@ Create a superuser using `python manage.py createsuperuser`. Staff/superusers ca
 - `GET/POST/PATCH/DELETE /api/addresses/` (authenticated)
 - `GET/POST/DELETE /api/wishlist/` (authenticated)
 - `GET/POST /api/reviews/` (verified buyers can submit; staff moderates)
-- `POST /api/coupons/validate/` (authenticated)
+- `POST /api/coupons/validate/` (public quote; order placement requires authentication)
 - `GET /api/admin/stats/` (staff only)
 - `POST /api/auth/password-reset/` and `/api/auth/password-reset/confirm/`
 - `POST /api/products/` (staff only)

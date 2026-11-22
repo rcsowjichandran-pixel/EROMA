@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import Group, User
@@ -36,6 +37,7 @@ class SofaLuxAdminSite(admin.AdminSite):
 
     def index(self, request, extra_context=None):
         extra_context = dict(extra_context or {})
+        confirmed_orders = Order.objects.confirmed()
         extra_context["studio_metrics"] = [
             {
                 "label": "Products",
@@ -51,8 +53,8 @@ class SofaLuxAdminSite(admin.AdminSite):
             },
             {
                 "label": "Orders",
-                "value": Order.objects.count(),
-                "detail": "All customer orders",
+                "value": confirmed_orders.count(),
+                "detail": "Confirmed customer orders",
                 "url": reverse(f"{self.name}:store_order_changelist"),
             },
             {
@@ -75,8 +77,8 @@ class SofaLuxAdminSite(admin.AdminSite):
             },
             {
                 "label": "Sales",
-                "value": Order.objects.exclude(status="cancelled").aggregate(total=Sum("total"))["total"] or 0,
-                "detail": "Non-cancelled order value",
+                "value": confirmed_orders.aggregate(total=Sum("total"))["total"] or 0,
+                "detail": "Confirmed order value",
                 "url": reverse(f"{self.name}:store_order_changelist"),
             },
         ]
@@ -231,6 +233,7 @@ class ProductImageInline(admin.TabularInline):
         field = super().formfield_for_dbfield(db_field, request, **kwargs)
         if db_field.name == "alt_text":
             field.help_text = (
+                "For an alternate view, describe the angle, such as Side view. "
                 "For a colour-specific photo, enter Colour: Olive with the configured colour name. "
                 "For a rotation photo, enter 360: 45 with the angle in degrees. Use at least eight evenly spaced angles."
             )
@@ -395,8 +398,20 @@ class OrderItemInline(admin.TabularInline):
     readonly_fields = ("product", "product_name", "quantity", "unit_price")
 
 
+class OrderManagementForm(forms.ModelForm):
+    def clean(self):
+        cleaned = super().clean()
+        if self.instance.pk and self.instance.payment_method == "razorpay":
+            if "payment_status" in self.changed_data:
+                self.add_error("payment_status", "Razorpay payment status comes from gateway verification.")
+            if "status" in self.changed_data and self.instance.payment_status != "paid":
+                self.add_error("status", "An unconfirmed payment cannot move through order fulfilment.")
+        return cleaned
+
+
 @admin.register(Order, site=admin_site)
 class OrderAdmin(admin.ModelAdmin):
+    form = OrderManagementForm
     list_display = (
         "id",
         "user",

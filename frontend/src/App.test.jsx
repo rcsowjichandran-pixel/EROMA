@@ -1,7 +1,7 @@
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import App, { BankOfferStrip, CartCouponOffers, openWhatsAppChat, ProductColourPreview, ProductGrid } from './App'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import App, { BankOfferStrip, CartCouponOffers, getCheckoutAmounts, ProductColourPreview, ProductGrid } from './App'
 
 const product = {
   id: 41,
@@ -17,6 +17,12 @@ const product = {
 
 afterEach(cleanup)
 
+it('uses paise for totals and does not add included GST again', () => {
+  expect(getCheckoutAmounts([{price:'1000.01',quantity:2}], '200.01', {})).toEqual({
+    total:2000.02,gstRate:18,taxAmount:274.58,deliveryFee:999,payableTotal:2799.01,
+  })
+})
+
 describe('storefront flows', () => {
   const sofa = {...product, status: 'active'}
   const table = {...product, id: 42, name: 'Oak table', regular_price: '0', status: 'active'}
@@ -24,10 +30,11 @@ describe('storefront flows', () => {
   function mockStore(endpoints = {}) {
     vi.stubGlobal('matchMedia', () => ({matches: false}))
     vi.stubGlobal('scrollTo', vi.fn())
-    vi.stubGlobal('fetch', vi.fn(async url => {
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
       const {pathname, search} = new URL(url)
       const route = pathname.replace(/^\/api/, '') + search
-      const data = endpoints[route] ?? (route === '/products/' ? [sofa, table] : [])
+      const endpoint = endpoints[route]
+      const data = typeof endpoint==='function' ? await endpoint(options) : endpoint ?? (route === '/products/' ? [sofa, table] : [])
       return {ok: true, status: 200, json: async () => await data}
     }))
   }
@@ -35,6 +42,16 @@ describe('storefront flows', () => {
   afterEach(() => {
     localStorage.clear()
     vi.unstubAllGlobals()
+  })
+
+  it('links the floating WhatsApp button and Contact Us directly to WhatsApp Web', () => {
+    mockStore()
+    render(<App/>)
+    const floatingLink = screen.getByRole('link', {name: 'Open EROMA on WhatsApp Web'})
+    expect(floatingLink.getAttribute('href')).toMatch(/^https:\/\/web\.whatsapp\.com\/send\?phone=[0-9]+$/)
+    expect(floatingLink).toHaveAttribute('target', '_blank')
+    fireEvent.click(screen.getByRole('button', {name: 'Contact Us', exact: true}))
+    expect(screen.getByRole('link', {name: 'Chat with EROMA'})).toHaveAttribute('href', floatingLink.getAttribute('href'))
   })
 
   it('filters Spot Deals to products with a markdown', async () => {
@@ -98,20 +115,33 @@ describe('storefront flows', () => {
     fireEvent.click(screen.getByRole('button', {name: 'Shop All'}))
     fireEvent.click(await screen.findByAltText('Luna sofa'))
 
-    expect(screen.getByText('0 in your bag')).toBeInTheDocument()
     expect(screen.getByText('10 available')).toBeInTheDocument()
     const increase = screen.getByRole('button', {name: 'Increase quantity'})
-    for (let step=0; step<3; step++) fireEvent.click(increase)
+    const decrease = screen.getByRole('button', {name: 'Decrease quantity'})
+    expect(screen.getByRole('group', {name: 'Quantity'}).querySelector('output')).toHaveTextContent('0')
+    expect(screen.getByRole('button', {name: 'Add to bag'})).toBeDisabled()
+    fireEvent.click(increase)
+    expect(screen.getByRole('group', {name: 'Quantity'}).querySelector('output')).toHaveTextContent('1')
+    expect(screen.getByText('9 available after adding')).toBeInTheDocument()
+    fireEvent.click(decrease)
+    expect(screen.getByText('10 available')).toBeInTheDocument()
+    for (let step=0; step<4; step++) fireEvent.click(increase)
     expect(screen.getByText('6 available after adding')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', {name: 'Decrease quantity'}))
     expect(screen.getByText('7 available after adding')).toBeInTheDocument()
     fireEvent.click(increase)
-    expect(screen.getByText('0 in your bag')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', {name: 'Add to bag'}))
-    expect(screen.getByText('4 in your bag')).toBeInTheDocument()
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByRole('button', {name: 'Add to bag'}))
+      expect(screen.getByText(/Added to your bag/)).toBeInTheDocument()
+      act(()=>vi.advanceTimersByTime(4000))
+      expect(screen.queryByText(/Added to your bag/)).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
     expect(screen.getByText('6 available')).toBeInTheDocument()
     expect(screen.getByRole('button', {name: 'Shopping bag: 4 items'})).toBeInTheDocument()
-    for (let step=0; step<5; step++) fireEvent.click(increase)
+    for (let step=0; step<6; step++) fireEvent.click(increase)
     expect(screen.getByRole('button', {name: 'Increase quantity'})).toBeDisabled()
     fireEvent.click(screen.getByRole('button', {name: 'Buy now'}))
     expect(screen.getByRole('button', {name: 'Shopping bag: 10 items'})).toBeInTheDocument()
@@ -119,7 +149,6 @@ describe('storefront flows', () => {
 
     fireEvent.click(screen.getByRole('button', {name: 'Back', exact: true}))
     expect(screen.getByRole('heading', {name: 'Luna sofa', level: 1})).toBeInTheDocument()
-    expect(screen.getByText('10 in your bag')).toBeInTheDocument()
     expect(screen.getByText('0 available')).toBeInTheDocument()
     expect(screen.getByRole('button', {name: 'Buy now'})).toBeDisabled()
     fireEvent.click(screen.getByRole('button', {name: 'Back', exact: true}))
@@ -127,7 +156,7 @@ describe('storefront flows', () => {
   })
 
   it('shows the catalog description and related products while keeping product back history', async () => {
-    const source = {...sofa, category: 2, description: 'A compact sofa for a smaller room.', dimensions: '150 x 85 x 80 cm'}
+    const source = {...sofa, category: 2, description: 'A compact sofa for a smaller room.\n\nPair with a soft rug.', dimensions: '150 x 85 x 80 cm'}
     const related = {...sofa, id: 43, name: 'Rowan sofa', category: 3, description: 'A deeper sofa with soft cushions.', image_url: '/media/rowan.jpg'}
     mockStore({
       '/products/': [source, related, {...table, category: 4}],
@@ -137,7 +166,8 @@ describe('storefront flows', () => {
     render(<App/>)
     fireEvent.click(screen.getByRole('button', {name: 'Shop All'}))
     fireEvent.click(await screen.findByAltText('Luna sofa'))
-    expect(screen.getByRole('region', {name: 'Product description'})).toHaveTextContent(source.description)
+    const description = screen.getByRole('region', {name: 'Product description'})
+    expect([...description.querySelectorAll('p')].map(paragraph=>paragraph.textContent)).toEqual(source.description.split('\n\n'))
     expect(screen.getByText(source.dimensions)).toBeInTheDocument()
     const suggestions = screen.getByRole('region', {name: 'Related products'})
     expect(suggestions).toHaveTextContent('Rowan sofa')
@@ -146,6 +176,60 @@ describe('storefront flows', () => {
     expect(screen.getByRole('heading', {name: 'Rowan sofa', level: 1})).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', {name: 'Back', exact: true}))
     expect(screen.getByRole('heading', {name: 'Luna sofa', level: 1})).toBeInTheDocument()
+  })
+
+  it('shows the reduced stock after a confirmed COD order, even if the stock refresh fails', async () => {
+    localStorage.setItem('sofalux_access', 'test-token')
+    const item = {...sofa, stock: 10}
+    const order = {id: 1, items: [{id: 1, product: item.id, product_name: item.name, quantity: 4}]}
+    let sold = false
+    mockStore({
+      '/products/': () => {if (sold) throw new Error('Offline');return [item]},
+      '/me/': {id: 1, username: 'shopper'},
+      '/profile/': {email: 'luna@example.com'},
+      '/addresses/': [{id: 1, full_name: 'Luna Shopper', city: 'Mumbai', address: '10 Test Street', phone: '9876543210', postal_code: '400001', is_default: true}],
+      '/orders/': options => {if (options.method==='POST') {sold=true;return order} return [order]},
+    })
+    render(<App/>)
+    fireEvent.click(screen.getByRole('button', {name: 'Shop All'}))
+    fireEvent.click(await screen.findByAltText('Luna sofa'))
+    const increase = screen.getByRole('button', {name: 'Increase quantity'})
+    for (let step=0;step<4;step++) fireEvent.click(increase)
+    fireEvent.click(screen.getByRole('button', {name: 'Buy now'}))
+    expect(await screen.findByDisplayValue('10 Test Street')).toBeInTheDocument()
+    fireEvent.submit(screen.getByRole('button', {name: 'Place COD order'}).closest('form'))
+    await screen.findByText(/Order #1 placed/)
+    fireEvent.click(screen.getByRole('button', {name: 'Back', exact: true}))
+    fireEvent.click(screen.getByRole('button', {name: 'Back', exact: true}))
+    expect(screen.getByText('6 available')).toBeInTheDocument()
+  })
+
+  it('keeps the bag and reports a verified payment failure when Razorpay checkout fails', async () => {
+    localStorage.setItem('sofalux_access', 'test-token')
+    localStorage.setItem('eroma_cart_user_1', JSON.stringify([{...sofa, quantity: 1}]))
+    const cancelPayment = vi.fn(() => ({cancelled: true}))
+    mockStore({
+      '/me/': {id: 1, username: 'shopper'},
+      '/profile/': {email: 'luna@example.com'},
+      '/addresses/': [{id: 1, full_name: 'Luna Shopper', city: 'Mumbai', address: '10 Test Street', phone: '9876543210', postal_code: '400001', is_default: true}],
+      '/payments/razorpay/config/': {enabled: true},
+      '/payments/razorpay/create-order/': {order_id: 10, razorpay_order_id: 'order_test'},
+      '/payments/razorpay/cancel/': cancelPayment,
+    })
+    vi.stubGlobal('Razorpay', class {
+      constructor(options) { this.options=options }
+      on(event, handler) { if (event==='payment.failed') this.onFailure=handler }
+      open() { this.onFailure();this.options.modal.ondismiss() }
+    })
+    render(<App/>)
+    fireEvent.click(await screen.findByRole('button', {name: 'Shopping bag: 1 items'}))
+    await screen.findByDisplayValue('10 Test Street')
+    fireEvent.change(screen.getByLabelText('Payment method'), {target: {value: 'razorpay'}})
+    fireEvent.submit(screen.getByRole('button', {name: 'Pay securely with Razorpay'}).closest('form'))
+
+    expect(await screen.findByText(/Payment failed\. Your order was not placed/)).toBeInTheDocument()
+    expect(cancelPayment).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', {name: 'Shopping bag: 1 items'})).toBeInTheDocument()
   })
 })
 
@@ -190,6 +274,18 @@ describe('ProductColourPreview', () => {
     fireEvent.click(screen.getByRole('button', {name: 'Choose Olive'}))
     expect(screen.getByAltText('L-shaped sofa, approximate Olive upholstery preview')).toHaveAttribute('src', '/media/L_shape.jpeg')
     expect(container.querySelector('.sofa-photo-tint').style.clipPath).not.toBe(firstOutline)
+  })
+
+  it('offers enlargement for one photo and shows confirmed alternate photos when available', () => {
+    const {rerender} = render(<ProductColourPreview product={product} photo={product.image_url}/>)
+    expect(screen.getByRole('button', {name: 'Enlarge photo'})).toBeInTheDocument()
+    expect(screen.queryByText(/360°/)).toBeNull()
+
+    const side = {image:'/media/luna-side.jpg',alt_text:'Side view'}
+    rerender(<ProductColourPreview product={{...product, images:[side]}} photo={product.image_url}/>)
+    expect(screen.getByRole('button', {name: 'View product photos'})).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: 'Show product photo 2'}))
+    expect(screen.getByAltText(product.name)).toHaveAttribute('src', side.image)
   })
 })
 
@@ -242,17 +338,5 @@ describe('CartCouponOffers', () => {
     expect(screen.queryByText('Furniture offer')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'HOME10' }))
     expect(onApply).toHaveBeenCalledWith('HOME10')
-  })
-})
-
-describe('WhatsApp customer contact', () => {
-  it('opens the configured EROMA number with the customer message prefilled', () => {
-    const openWindow = vi.fn()
-    expect(openWhatsAppChat('+91 88388 16692', 'I need help with a sofa', openWindow)).toBe(true)
-    expect(openWindow).toHaveBeenCalledWith(
-      'https://wa.me/918838816692?text=I%20need%20help%20with%20a%20sofa',
-      '_blank',
-      'noopener,noreferrer',
-    )
   })
 })

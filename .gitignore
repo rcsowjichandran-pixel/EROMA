@@ -39,6 +39,8 @@ backend/render-catalog-before.json
 *.dump
 *.backup
 *.log
+/.handoff-work/
+/handoff/
 
 # Operating system files
 .DS_Store

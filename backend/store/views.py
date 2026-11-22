@@ -19,7 +19,8 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.mail import EmailMessage, send_mail
-from django.db.models import Sum, Q, F, Avg, Count, Prefetch
+from django.db import transaction
+from django.db.models import Sum, Q, F, Avg, Count, Max, Prefetch
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
@@ -28,6 +29,7 @@ from .models import Address, CallbackRequest, ContactMessage, Coupon, CouponRede
 from .serializers import AddressSerializer, RegisterSerializer, ProductSerializer, ProductImageSerializer, CategorySerializer, HomepageBannerSerializer, OrderSerializer, CreateOrderSerializer, ProductReviewSerializer, UserProfileSerializer, WishlistItemSerializer, OrderLineInputSerializer, StoreLocationSerializer, OfferBannerSerializer, FooterPageContentSerializer, SiteBrandingSerializer, coupon_category_ids
 from .permissions import IsStaffOrReadOnly
 from .contact_fields import PHONE_PATTERN, PIN_PATTERN, PHONE_ERROR, PIN_ERROR
+from .checkout_amounts import coupon_discount
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +129,26 @@ class ProductViewSet(viewsets.ModelViewSet):
             "request": request,
             "collective_product_rating": collective_product_rating(),
         }).data)
+
+    @action(detail=True, methods=["post"], url_path="gallery")
+    def upload_gallery(self, request, pk=None):
+        product = self.get_object()
+        files = request.FILES.getlist("images")
+        if not 1 <= len(files) <= 12:
+            return Response({"detail": "Choose between 1 and 12 alternate photos."}, status=400)
+
+        serializer = ProductImageSerializer(data=[
+            {"image": file, "alt_text": f"{product.name[:160]} — alternate view"}
+            for file in files
+        ], many=True, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            product = Product.objects.select_for_update().get(pk=product.pk)
+            last_order = product.images.aggregate(last_order=Max("sort_order"))["last_order"] or 0
+            for offset, values in enumerate(serializer.validated_data, start=1):
+                ProductImage.objects.create(product=product, sort_order=last_order+offset, **values)
+
+        return Response(self.get_serializer(self.get_object()).data, status=status.HTTP_201_CREATED)
 
 
 class ProductRecommendationView(APIView):
@@ -618,7 +640,6 @@ def _razorpay_request(method, path, payload=None):
 
 
 def _release_razorpay_order(order_id, user):
-    from django.db import transaction
     with transaction.atomic():
         try:
             order = Order.objects.select_for_update().get(pk=order_id, user=user, payment_method="razorpay")
@@ -626,13 +647,28 @@ def _release_razorpay_order(order_id, user):
             return False
         if order.payment_status != "pending":
             return False
-        for line in order.items.select_related("product").all():
+        for line in order.items.order_by("product_id"):
             Product.objects.filter(pk=line.product_id).update(stock=F("stock") + line.quantity)
         CouponRedemption.objects.filter(order=order).delete()
         order.payment_status = "failed"
         order.status = "cancelled"
         order.save(update_fields=["payment_status", "status"])
         return True
+
+
+def _matches_razorpay_payment(order, payment):
+    return (
+        payment.get("order_id") == order.razorpay_order_id
+        and payment.get("amount") == int(order.total * 100)
+        and payment.get("currency") == "INR"
+    )
+
+
+def _mark_razorpay_paid(order, payment_id, payment):
+    order.payment_status = "paid"
+    order.razorpay_payment_id = payment_id
+    order.payment_instrument = str(payment.get("method", ""))[:20]
+    order.save(update_fields=["payment_status", "razorpay_payment_id", "payment_instrument"])
 
 
 class RazorpayConfigView(APIView):
@@ -665,33 +701,37 @@ class RazorpayCreateOrderView(APIView):
         if emi_requested:
             order.save(update_fields=["emi_requested"])
         try:
+            amount = int(order.total * 100)
             gateway_order = _razorpay_request("POST", "orders", {
-                "amount": int((order.total * 100).quantize(Decimal("1"))),
+                "amount": amount,
                 "currency": "INR",
                 "receipt": f"eroma-{order.id}",
                 "notes": {"eroma_order_id": str(order.id)},
             })
+            if not gateway_order["id"] or gateway_order["amount"] != amount or gateway_order["currency"] != "INR":
+                raise ValueError("Razorpay returned mismatched order details")
             order.razorpay_order_id = gateway_order["id"]
             order.save(update_fields=["razorpay_order_id"])
-        except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
+        except (urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError):
             _release_razorpay_order(order.id, request.user)
-            return Response({"detail": "Razorpay could not start the payment. Your stock and coupon have been released; please retry."}, status=502)
+            return Response({"detail": "Payment failed to start. Your order was not placed; please try again."}, status=502)
         return Response({"order_id": order.id, "razorpay_order_id": order.razorpay_order_id,
                          "amount": gateway_order["amount"], "currency": gateway_order["currency"],
                          "key_id": settings.RAZORPAY_KEY_ID, "name": "EROMA", "description": "EROMA furniture order",
-                         "prefill": {"name": order.full_name, "email": order.email, "contact": order.phone}})
+                         "prefill": {"name": order.full_name, "email": order.email, "contact": f"+91{order.phone}"}})
 
 
 class RazorpayVerifyView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request):
         order_id = request.data.get("order_id")
         payment_id = str(request.data.get("razorpay_payment_id", ""))
         gateway_order_id = str(request.data.get("razorpay_order_id", ""))
         signature = str(request.data.get("razorpay_signature", ""))
         try:
-            order = Order.objects.get(pk=order_id, user=request.user, payment_method="razorpay")
+            order = Order.objects.select_for_update().get(pk=order_id, user=request.user, payment_method="razorpay")
         except (Order.DoesNotExist, ValueError, TypeError):
             return Response({"detail": "Order not found."}, status=404)
         if order.payment_status == "paid" and order.razorpay_payment_id == payment_id:
@@ -703,9 +743,8 @@ class RazorpayVerifyView(APIView):
             return Response({"detail": "Razorpay payment signature could not be verified."}, status=400)
         try:
             payment = _razorpay_request("GET", f"payments/{payment_id}")
-            expected_amount = int((order.total * 100).quantize(Decimal("1")))
-            if (payment.get("order_id") != order.razorpay_order_id or payment.get("amount") != expected_amount
-                    or payment.get("currency") != "INR"):
+            expected_amount = int(order.total * 100)
+            if not _matches_razorpay_payment(order, payment):
                 return Response({"detail": "Razorpay payment details do not match this order."}, status=400)
             if order.emi_requested and payment.get("method") != "emi":
                 return Response({"detail": "No EMI payment was confirmed. Choose EMI in Razorpay Checkout, or retry with a card payment."}, status=400)
@@ -713,31 +752,41 @@ class RazorpayVerifyView(APIView):
                 payment = _razorpay_request("POST", f"payments/{payment_id}/capture", {"amount": expected_amount, "currency": "INR"})
         except (urllib.error.URLError, TimeoutError, ValueError):
             return Response({"detail": "Payment was received, but its status could not be confirmed. Please contact support before retrying."}, status=503)
-        if (payment.get("order_id") != order.razorpay_order_id or payment.get("amount") != expected_amount
-                or payment.get("currency") != "INR" or payment.get("status") != "captured"):
+        if not _matches_razorpay_payment(order, payment) or payment.get("status") != "captured":
             return Response({"detail": "Razorpay has not confirmed a captured payment for this order."}, status=400)
-        order.payment_status = "paid"
-        order.razorpay_payment_id = payment_id
-        order.payment_instrument = str(payment.get("method", ""))[:20]
-        order.save(update_fields=["payment_status", "razorpay_payment_id", "payment_instrument"])
+        _mark_razorpay_paid(order, payment_id, payment)
         return Response(OrderSerializer(order).data)
 
 
 class RazorpayCancelView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request):
         try:
-            order = Order.objects.get(pk=request.data.get("order_id"), user=request.user, payment_method="razorpay")
+            order = Order.objects.select_for_update().get(pk=request.data.get("order_id"), user=request.user, payment_method="razorpay")
         except (Order.DoesNotExist, ValueError, TypeError):
+            return Response({"detail": "Payment attempt not found."}, status=404)
+        if order.payment_status == "paid":
+            return Response({"cancelled": False, "order": OrderSerializer(order).data})
+        if order.payment_status == "failed":
+            return Response({"cancelled": True})
+        if order.payment_status != "pending":
             return Response({"cancelled": False})
-        if order.razorpay_order_id and settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET:
+        if order.razorpay_order_id:
             try:
-                gateway_order = _razorpay_request("GET", f"orders/{order.razorpay_order_id}")
-                if gateway_order.get("status") == "paid":
-                    return Response({"cancelled": False, "detail": "Razorpay has already recorded a payment for this order."})
-            except (urllib.error.URLError, TimeoutError, ValueError):
-                return Response({"cancelled": False, "detail": "Payment status could not be checked; the order is kept pending."}, status=503)
+                payments = _razorpay_request("GET", f"orders/{order.razorpay_order_id}/payments")["items"]
+                if not isinstance(payments, list) or any(not isinstance(payment, dict) for payment in payments):
+                    raise ValueError("Invalid Razorpay payment list")
+            except (urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError):
+                return Response({"detail": "Payment status could not be checked. Please contact support before retrying."}, status=503)
+            for payment in payments:
+                if (payment.get("status") == "captured" and payment.get("id") and _matches_razorpay_payment(order, payment)
+                        and (not order.emi_requested or payment.get("method") == "emi")):
+                    _mark_razorpay_paid(order, payment["id"], payment)
+                    return Response({"cancelled": False, "order": OrderSerializer(order).data})
+            if any(payment.get("status") not in ("failed", "refunded") for payment in payments):
+                return Response({"detail": "A payment is still being checked. Please contact support before retrying."}, status=409)
         if _release_razorpay_order(order.id, request.user):
             return Response({"cancelled": True})
         return Response({"cancelled": False})
@@ -767,6 +816,8 @@ class OrderViewSet(viewsets.ModelViewSet):
         new_status = request.data.get("status")
         if new_status not in dict(Order.STATUS_CHOICES):
             return Response({"detail":"Invalid status."}, status=400)
+        if order.payment_method == "razorpay" and order.payment_status != "paid":
+            return Response({"detail": "Only confirmed payments can move through order fulfilment."}, status=400)
         order.status = new_status
         order.save(update_fields=["status"])
         return Response(OrderSerializer(order).data)
@@ -1045,9 +1096,7 @@ class CouponValidationView(APIView):
             return Response({"detail": f"Minimum order is ₹{coupon.minimum_order}."}, status=400)
         if coupon.usage_limit is not None and coupon.redemptions.count() >= coupon.usage_limit:
             return Response({"detail": "This coupon has reached its usage limit."}, status=400)
-        from decimal import Decimal
-        discount = subtotal * coupon.discount_value / Decimal("100") if coupon.discount_type == "percent" else coupon.discount_value
-        discount = min(discount, subtotal)
+        discount = coupon_discount(coupon, subtotal)
         return Response({"code": coupon.code, "subtotal": subtotal, "discount": discount, "total": subtotal-discount})
 
 
@@ -1080,12 +1129,13 @@ class AdminStatsView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
+        confirmed_orders = Order.objects.confirmed()
         return Response({
             "products": Product.objects.count(),
             "users": get_user_model().objects.filter(is_staff=False).count(),
-            "orders": Order.objects.count(),
-            "pending_orders": Order.objects.filter(status="placed").count(),
-            "sales": Order.objects.exclude(status="cancelled").aggregate(total=Sum("total"))["total"] or 0,
+            "orders": confirmed_orders.count(),
+            "pending_orders": confirmed_orders.filter(status="placed").count(),
+            "sales": confirmed_orders.aggregate(total=Sum("total"))["total"] or 0,
             "low_stock": Product.objects.filter(stock__lte=5, status="active").count(),
         })
 

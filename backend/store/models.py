@@ -341,7 +341,15 @@ class StoreLocation(models.Model):
     def __str__(self):
         return f"{self.city}, {self.state}"
 
+class OrderQuerySet(models.QuerySet):
+    def confirmed(self):
+        return self.filter(models.Q(payment_method="cod") | models.Q(payment_status="paid")).exclude(
+            models.Q(status="cancelled") | models.Q(payment_status__in=("failed", "refunded"))
+        )
+
+
 class Order(models.Model):
+    objects = OrderQuerySet.as_manager()
     STATUS_CHOICES = [
         ("placed", "Placed"), ("ready_to_pack", "Ready to pack"),
         ("packed", "Packed"), ("dispatched", "Dispatched"),

@@ -1,9 +1,12 @@
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import patch
 from urllib.parse import urlparse, parse_qs
 
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from PIL import Image
 from rest_framework.test import APIClient
 
 from .models import Address, Category, ContactMessage, Coupon, CouponRedemption, Order, OrderItem, Product, ProductReview, WishlistItem
@@ -28,6 +31,18 @@ class CommerceApiTests(TestCase):
             "items": [{"product_id": self.product.id, "quantity": 2}], **overrides,
         }
 
+    def test_registration_applies_django_password_validators(self):
+        guest = APIClient()
+        payload = {"username": "newshopper", "email": "new@example.test", "password": "password123"}
+        weak = guest.post("/api/auth/register/", payload, format="json")
+        self.assertEqual(weak.status_code, 400, weak.data)
+        self.assertIn("password", weak.data)
+        self.assertFalse(User.objects.filter(username=payload["username"]).exists())
+        payload["password"] = "Maple!Gallery529"
+        strong = guest.post("/api/auth/register/", payload, format="json")
+        self.assertEqual(strong.status_code, 201, strong.data)
+        self.assertTrue(User.objects.get(username=payload["username"]).check_password(payload["password"]))
+
     def test_coupon_order_reduces_stock_and_records_tracking_and_redemption(self):
         coupon = Coupon.objects.create(code="SAVE10", discount_type="percent", discount_value=10)
 
@@ -43,6 +58,68 @@ class CommerceApiTests(TestCase):
         self.assertEqual(self.product.stock, 3)
         self.assertEqual(order.tracking_code, response.data["tracking_code"])
         self.assertTrue(CouponRedemption.objects.filter(coupon=coupon, user=self.user, order=order).exists())
+
+    def test_cents_and_coupon_quote_match_the_cod_order(self):
+        self.product.price = Decimal("1000.01")
+        self.product.save(update_fields=["price"])
+        Coupon.objects.create(code="SAVE5", discount_type="percent", discount_value=Decimal("5.00"))
+        payload = self.order_payload(coupon_code="SAVE5", items=[{"product_id": self.product.id, "quantity": 1}])
+        quote = self.client.post("/api/coupons/validate/", {"code": "SAVE5", "items": payload["items"]}, format="json")
+        placed = self.client.post("/api/orders/", payload, format="json")
+        self.assertEqual(placed.status_code, 201, placed.data)
+        self.assertEqual(Decimal(placed.data["discount_amount"]), quote.data["discount"])
+        self.assertEqual(Decimal(placed.data["tax_amount"]), Decimal("144.92"))
+        self.assertEqual(Decimal(placed.data["total"]), Decimal("1949.01"))
+        self.assertEqual(self.client.get(f"/api/products/{self.product.id}/").data["stock"], 4)
+
+    @override_settings(RAZORPAY_KEY_ID="test-id", RAZORPAY_KEY_SECRET="test-secret")
+    @patch("store.views._razorpay_request")
+    def test_failed_razorpay_releases_stock_once_and_excludes_attempt_from_order_counts(self, gateway):
+        Coupon.objects.create(code="SAVE10", discount_type="percent", discount_value=10)
+        gateway.side_effect = [
+            {"id": "order_failed", "amount": 279900, "currency": "INR"},
+            {"items": [{"status": "failed"}]},
+        ]
+        started = self.client.post("/api/payments/razorpay/create-order/", self.order_payload(coupon_code="SAVE10"), format="json")
+        self.assertEqual(started.status_code, 200, started.data)
+        self.assertEqual(started.data["prefill"]["contact"], "+919876543210")
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 3)
+        order_id = started.data["order_id"]
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.assertEqual(self.client.get("/api/admin/stats/").data["pending_orders"], 0)
+
+        for _ in range(2):
+            cancelled = self.client.post("/api/payments/razorpay/cancel/", {"order_id": order_id}, format="json")
+            self.assertEqual(cancelled.data, {"cancelled": True})
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+        order = Order.objects.get(pk=order_id)
+        self.assertEqual((order.payment_status, order.status), ("failed", "cancelled"))
+        self.assertFalse(CouponRedemption.objects.filter(order=order).exists())
+        self.assertEqual(self.client.get("/api/admin/stats/").data["orders"], 0)
+        self.assertEqual(gateway.call_count, 2)
+
+    @override_settings(RAZORPAY_KEY_ID="test-id", RAZORPAY_KEY_SECRET="test-secret")
+    @patch("store.views._razorpay_request")
+    def test_cancel_reconciles_a_payment_already_captured(self, gateway):
+        payment = {"id": "pay_captured", "order_id": "order_captured", "amount": 299900,
+                   "currency": "INR", "method": "card", "status": "captured"}
+        gateway.side_effect = [
+            {"id": "order_captured", "amount": 299900, "currency": "INR"},
+            {"items": [{**payment, "status": "authorized"}]},
+            {"items": [payment]},
+        ]
+        started = self.client.post("/api/payments/razorpay/create-order/", self.order_payload(), format="json")
+        self.assertEqual(started.status_code, 200, started.data)
+        payload = {"order_id": started.data["order_id"]}
+        pending = self.client.post("/api/payments/razorpay/cancel/", payload, format="json")
+        self.assertEqual(pending.status_code, 409, pending.data)
+        captured = self.client.post("/api/payments/razorpay/cancel/", payload, format="json")
+        self.assertEqual(captured.data["order"]["payment_status"], "paid")
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 3)
 
     def test_invalid_coupon_rolls_back_stock_deduction(self):
         response = self.client.post("/api/orders/", self.order_payload(coupon_code="NOPE"), format="json")
@@ -78,6 +155,27 @@ class CommerceApiTests(TestCase):
         response = APIClient().get("/api/products/", {"search": "dinning"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["id"] for item in response.data], [table.id])
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_staff_can_add_alternate_photos_without_replacing_the_product_cover(self):
+        self.product.image_url = "https://example.com/luna-main.jpg"
+        self.product.save(update_fields=["image_url"])
+        url = f"/api/products/{self.product.id}/gallery/"
+        self.assertEqual(self.client.post(url, {}, format="multipart").status_code, 403)
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        picture = BytesIO()
+        Image.new("RGB", (4, 4), "white").save(picture, format="PNG")
+        response = self.client.post(url, {
+            "images": [SimpleUploadedFile(name, picture.getvalue(), "image/png") for name in ("side.png", "rear.png")],
+        }, format="multipart")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["image_url"], self.product.image_url)
+        self.assertEqual([photo["sort_order"] for photo in response.data["images"]], [1, 2])
+        self.assertFalse(any(photo["is_primary"] for photo in response.data["images"]))
 
     def test_order_and_callback_reject_bad_phone_and_pin(self):
         payload = self.order_payload(phone="12345678901", postal_code="40001")
