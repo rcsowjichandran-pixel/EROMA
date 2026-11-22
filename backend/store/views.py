@@ -39,7 +39,7 @@ def _search_category_name(query):
         ({"sofa", "sofas", "couch", "couches"}, "Sofas"),
         ({"chair", "chairs", "armchair", "armchairs", "recliner", "recliners"}, "Chairs & Armchairs"),
         ({"lounger", "loungers", "ottoman", "ottomans", "pouffe", "pouffes"}, "Loungers & Ottomans"),
-        ({"dining", "diningtable", "diningset"}, "Dining Furniture"),
+        ({"dining", "dinning", "diningtable", "dinningtable", "diningset", "dinningset"}, "Dining Furniture"),
         ({"bed", "beds", "bedroom", "bedside"}, "Beds & Bedroom"),
         ({"table", "tables", "desk", "desks"}, "Tables"),
         ({"storage", "cabinet", "cabinets", "wardrobe", "wardrobes"}, "Storage Furniture"),

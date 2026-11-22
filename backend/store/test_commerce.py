@@ -71,6 +71,14 @@ class CommerceApiTests(TestCase):
         }, format="json")
         self.assertEqual(response.status_code, 400, response.data)
 
+    def test_dinning_search_matches_dining_furniture(self):
+        dining = Category.objects.create(name="Dining Furniture", slug="dining")
+        tables = Category.objects.create(name="Dining Tables", slug="dining-tables", parent=dining)
+        table = Product.objects.create(name="Oak table", slug="oak-table", category=tables, price=6000, stock=2)
+        response = APIClient().get("/api/products/", {"search": "dinning"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data], [table.id])
+
     def test_order_and_callback_reject_bad_phone_and_pin(self):
         payload = self.order_payload(phone="12345678901", postal_code="40001")
         order = self.client.post("/api/orders/", payload, format="json")
