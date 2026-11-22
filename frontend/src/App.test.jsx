@@ -64,6 +64,17 @@ describe('storefront flows', () => {
     expect(screen.queryByRole('button', {name: 'Add Oak table to bag'})).toBeNull()
   })
 
+  it('hides the Back button when returning home through the logo', async () => {
+    mockStore()
+    render(<App/>)
+    const backButton = {name: 'Back', exact: true}
+    expect(screen.queryByRole('button', backButton)).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', {name: 'Shop All'}))
+    expect(screen.getByRole('button', backButton)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: 'EROMA home'}))
+    expect(screen.queryByRole('button', backButton)).not.toBeInTheDocument()
+  })
+
   it('shows progress and then the result count for a submitted search', async () => {
     let finishSearch
     mockStore({'/products/?search=sofa': new Promise(resolve => {finishSearch = resolve})})
