@@ -395,6 +395,23 @@ class CommerceApiTests(TestCase):
         search = admin_client.get("/admin/store/order/", {"q": tracking_code})
         self.assertContains(search, tracking_code)
 
+    def test_admin_dashboard_separates_confirmed_and_paid_order_counts(self):
+        cod = self.client.post("/api/orders/", self.order_payload(quantity=1), format="json")
+        paid = self.client.post("/api/orders/", self.order_payload(quantity=1), format="json")
+        self.assertEqual((cod.status_code, paid.status_code), (201, 201))
+        Order.objects.filter(pk=paid.data["id"]).update(payment_method="razorpay", payment_status="paid")
+        self.user.is_staff = True
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_staff", "is_superuser"])
+        admin_client = Client()
+        admin_client.force_login(self.user)
+
+        dashboard = admin_client.get("/admin/")
+        metrics = {metric["label"]: metric for metric in dashboard.context["studio_metrics"]}
+        self.assertEqual(metrics["Orders"]["value"], 2)
+        self.assertEqual(metrics["Paid orders"]["value"], 1)
+        self.assertIn("payment_status__exact=paid", metrics["Paid orders"]["url"])
+
     @override_settings(GEMINI_API_KEY="")
     def test_store_assistant_compares_wooden_and_cushioned_sofas_without_ai(self):
         response = APIClient().post("/api/assistant/chat/", {

@@ -58,6 +58,12 @@ class SofaLuxAdminSite(admin.AdminSite):
                 "url": reverse(f"{self.name}:store_order_changelist"),
             },
             {
+                "label": "Paid orders",
+                "value": confirmed_orders.filter(payment_status="paid").count(),
+                "detail": "Orders with payment received",
+                "url": f'{reverse(f"{self.name}:store_order_changelist")}?payment_status__exact=paid',
+            },
+            {
                 "label": "Offers",
                 "value": Offer.objects.filter(is_active=True).count(),
                 "detail": "Active promotions",
