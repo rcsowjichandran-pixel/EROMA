@@ -407,10 +407,9 @@ class CommerceApiTests(TestCase):
         admin_client.force_login(self.user)
 
         dashboard = admin_client.get("/admin/")
-        metrics = {metric["label"]: metric for metric in dashboard.context["studio_metrics"]}
-        self.assertEqual(metrics["Orders"]["value"], 2)
-        self.assertEqual(metrics["Paid orders"]["value"], 1)
-        self.assertIn("payment_status__exact=paid", metrics["Paid orders"]["url"])
+        self.assertEqual(dashboard.context["fulfillment_total"], 2)
+        self.assertEqual(dashboard.context["paid_orders"], 1)
+        self.assertContains(dashboard, 'href="/admin/store/order/?payment_status__exact=paid">1 paid order</a>')
 
     @override_settings(GEMINI_API_KEY="")
     def test_store_assistant_compares_wooden_and_cushioned_sofas_without_ai(self):

@@ -2,9 +2,11 @@ from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import Group, User
-from django.db.models import Sum
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import TruncMonth
 from django.utils.html import format_html
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import (
     Category,
@@ -32,63 +34,107 @@ from .models import (
 class SofaLuxAdminSite(admin.AdminSite):
     site_header = "EROMA Admin Studio"
     site_title = "EROMA Admin"
-    index_title = "Furniture for every space."
+    index_title = "Dashboard"
     index_template = "store/admin/index.html"
 
     def index(self, request, extra_context=None):
-        extra_context = dict(extra_context or {})
-        confirmed_orders = Order.objects.confirmed()
-        extra_context["studio_metrics"] = [
-            {
-                "label": "Products",
-                "value": Product.objects.count(),
-                "detail": "Catalogue items",
-                "url": reverse(f"{self.name}:store_product_changelist"),
-            },
-            {
-                "label": "Categories",
-                "value": Category.objects.filter(parent__isnull=True).count(),
-                "detail": "Parent collections",
-                "url": reverse(f"{self.name}:store_category_changelist"),
-            },
-            {
-                "label": "Orders",
-                "value": confirmed_orders.count(),
-                "detail": "Confirmed customer orders",
-                "url": reverse(f"{self.name}:store_order_changelist"),
-            },
-            {
-                "label": "Paid orders",
-                "value": confirmed_orders.filter(payment_status="paid").count(),
-                "detail": "Orders with payment received",
-                "url": f'{reverse(f"{self.name}:store_order_changelist")}?payment_status__exact=paid',
-            },
-            {
-                "label": "Offers",
-                "value": Offer.objects.filter(is_active=True).count(),
-                "detail": "Active promotions",
-                "url": reverse(f"{self.name}:store_offer_changelist"),
-            },
-            {
-                "label": "Store locations",
-                "value": StoreLocation.objects.filter(is_active=True).count(),
-                "detail": "Published showroom cards",
-                "url": reverse(f"{self.name}:store_storelocation_changelist"),
-            },
-            {
-                "label": "Customers",
-                "value": User.objects.filter(is_staff=False).count(),
-                "detail": "Registered customers",
-                "url": reverse("admin:auth_user_changelist"),
-            },
-            {
-                "label": "Sales",
-                "value": confirmed_orders.aggregate(total=Sum("total"))["total"] or 0,
-                "detail": "Confirmed order value",
-                "url": reverse(f"{self.name}:store_order_changelist"),
-            },
-        ]
-        return super().index(request, extra_context)
+        context = dict(extra_context or {})
+        order_admin = self._registry[Order]
+        product_admin = self._registry[Product]
+        customer_admin = self._registry[User]
+        today = timezone.localdate()
+
+        if order_admin.has_view_or_change_permission(request):
+            orders = order_admin.get_queryset(request)
+            confirmed = orders.confirmed()
+            period = 12 if request.GET.get("months") == "12" else 6
+            current_month = today.year * 12 + today.month - 1
+            months = [
+                today.replace(year=month // 12, month=month % 12 + 1, day=1)
+                for month in range(current_month - period + 1, current_month + 1)
+            ]
+            sales = {
+                row["month"].date(): row["value"]
+                for row in confirmed.filter(created_at__date__gte=months[0])
+                .annotate(month=TruncMonth("created_at"))
+                .values("month")
+                .annotate(value=Sum("total"))
+                .order_by()
+            }
+            peak = max((sales.get(month, 0) for month in months), default=0)
+            sales_summary = confirmed.aggregate(
+                value=Sum("total"),
+                paid=Count("pk", filter=Q(payment_status="paid")),
+            )
+            orders_url = reverse(f"{self.name}:store_order_changelist")
+            context.update(
+                orders_url=orders_url,
+                paid_orders_url=f"{orders_url}?payment_status__exact=paid",
+                paid_orders=sales_summary["paid"],
+                sales_total=sales_summary["value"] or 0,
+                orders_today=confirmed.filter(created_at__date=today).count(),
+                sales_months=period,
+                sales_chart=[
+                    {
+                        "month": month,
+                        "value": sales.get(month, 0),
+                        "height": round(sales.get(month, 0) * 100 / peak) if peak else 0,
+                    }
+                    for month in months
+                ],
+                recent_orders=orders.order_by("-created_at", "-pk")[:5],
+            )
+
+            fulfillment = confirmed.aggregate(
+                preparing=Count("pk", filter=Q(status__in=("placed", "ready_to_pack", "packed"))),
+                shipping=Count("pk", filter=Q(status__in=("dispatched", "in_transit", "out_for_delivery"))),
+                delivered=Count("pk", filter=Q(status="delivered")),
+            )
+            total = sum(fulfillment.values())
+            context["fulfillment_total"] = total
+            if total:
+                context["fulfillment_preparing_end"] = round(fulfillment["preparing"] * 100 / total)
+                context["fulfillment_shipping_end"] = round(
+                    (fulfillment["preparing"] + fulfillment["shipping"]) * 100 / total
+                )
+            context["fulfillment"] = [
+                {
+                    "label": label,
+                    "color": key,
+                    "count": fulfillment[key],
+                }
+                for key, label in (
+                    ("preparing", "Preparing"),
+                    ("shipping", "On the way"),
+                    ("delivered", "Delivered"),
+                )
+            ]
+
+        if product_admin.has_view_or_change_permission(request):
+            products = product_admin.get_queryset(request)
+            inventory = products.filter(status="active").aggregate(
+                in_stock=Count("pk", filter=Q(stock__gt=5)),
+                low_stock=Count("pk", filter=Q(stock__range=(1, 5))),
+                out_of_stock=Count("pk", filter=Q(stock=0)),
+            )
+            context.update(
+                products_url=reverse(f"{self.name}:store_product_changelist"),
+                inventory=inventory,
+            )
+            if "orders_url" in context:
+                context["top_products"] = (
+                    OrderItem.objects.filter(order__in=confirmed, product__in=products)
+                    .values("product_id", "product__name", "product__stock")
+                    .annotate(units=Sum("quantity"))
+                    .order_by("-units", "product__name", "product_id")[:5]
+                )
+
+        if customer_admin.has_view_or_change_permission(request):
+            context.update(
+                customers_url=reverse(f"{self.name}:auth_user_changelist"),
+                customers=customer_admin.get_queryset(request).filter(is_staff=False).count(),
+            )
+        return super().index(request, context)
 
 
 admin_site = SofaLuxAdminSite(name="admin")
