@@ -1,3 +1,6 @@
+from decimal import Decimal
+from math import ceil
+
 from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
@@ -62,6 +65,8 @@ class SofaLuxAdminSite(admin.AdminSite):
                 .order_by()
             }
             peak = max((sales.get(month, 0) for month in months), default=0)
+            magnitude = Decimal(10) ** max(0, peak.adjusted() - 1) if peak else Decimal(1)
+            tick = ceil(peak / (4 * magnitude)) * magnitude if peak else Decimal(1)
             sales_summary = confirmed.aggregate(
                 value=Sum("total"),
                 paid=Count("pk", filter=Q(payment_status="paid")),
@@ -74,11 +79,13 @@ class SofaLuxAdminSite(admin.AdminSite):
                 sales_total=sales_summary["value"] or 0,
                 orders_today=confirmed.filter(created_at__date=today).count(),
                 sales_months=period,
+                sales_ticks=[tick * index for index in range(4, -1, -1)],
+                sales_has_data=bool(peak),
                 sales_chart=[
                     {
                         "month": month,
                         "value": sales.get(month, 0),
-                        "height": round(sales.get(month, 0) * 100 / peak) if peak else 0,
+                        "height": round(sales.get(month, 0) * 100 / (4 * tick), 2),
                     }
                     for month in months
                 ],
@@ -117,10 +124,17 @@ class SofaLuxAdminSite(admin.AdminSite):
                 low_stock=Count("pk", filter=Q(stock__range=(1, 5))),
                 out_of_stock=Count("pk", filter=Q(stock=0)),
             )
+            inventory_total = sum(inventory.values())
             context.update(
                 products_url=reverse(f"{self.name}:store_product_changelist"),
                 inventory=inventory,
+                inventory_total=inventory_total,
             )
+            if inventory_total:
+                context["inventory_in_stock_end"] = round(inventory["in_stock"] * 100 / inventory_total, 3)
+                context["inventory_low_stock_end"] = round(
+                    (inventory["in_stock"] + inventory["low_stock"]) * 100 / inventory_total, 3
+                )
             if "orders_url" in context:
                 context["top_products"] = (
                     OrderItem.objects.filter(order__in=confirmed, product__in=products)

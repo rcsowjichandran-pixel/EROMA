@@ -5,7 +5,7 @@
   {{ block.super }}
   <link rel="stylesheet" href="{% static 'store/admin.css' %}">
 {% endblock %}
-{% block bodyclass %}{{ block.super }} studio-index{% endblock %}
+{% block bodyclass %}studio-index{% endblock %}
 {% block coltype %}colM{% endblock %}
 {% block content_title %}{% endblock %}
 {% block sidebar %}{% endblock %}
@@ -57,15 +57,21 @@
             <a href="?months=12#studio-sales"{% if sales_months == 12 %} aria-current="true"{% endif %}>12 months</a>
           </div>
         </div>
+        <div class="studio-sales-chart">
+        <ol class="studio-axis" aria-hidden="true">
+          {% for tick in sales_ticks %}<li>&#8377;{{ tick|floatformat:"0g" }}</li>{% endfor %}
+        </ol>
         <ul class="studio-chart" aria-label="Monthly confirmed order value">
           {% for point in sales_chart %}
-          <li title="{{ point.month|date:'F Y' }} &#8377;{{ point.value|floatformat:'2g' }}">
+          <li tabindex="0" aria-label="{{ point.month|date:'F Y' }} &#8377;{{ point.value|floatformat:'2g' }}">
             <span class="studio-bar-track" aria-hidden="true"><span style="--height: {{ point.height|unlocalize }}%"></span></span>
             <span aria-hidden="true">{{ point.month|date:"M" }}</span>
-            <span class="visually-hidden">{{ point.month|date:"F Y" }} &#8377;{{ point.value|floatformat:"2g" }}</span>
+            <span class="studio-bar-value" aria-hidden="true">{{ point.month|date:"M Y" }} · &#8377;{{ point.value|floatformat:"2g" }}</span>
           </li>
           {% endfor %}
         </ul>
+        </div>
+        {% if not sales_has_data %}<p class="studio-note">No confirmed sales in this period.</p>{% endif %}
         <p class="studio-note"><a href="{{ paid_orders_url }}">{{ paid_orders }} paid order{{ paid_orders|pluralize }}</a></p>
       </section>
       {% endif %}
@@ -73,12 +79,15 @@
       {% if products_url %}
       <section class="studio-panel" id="studio-inventory" aria-labelledby="studio-inventory-title">
         <h2 id="studio-inventory-title">Inventory status</h2>
-        <p class="studio-note">Active catalogue products</p>
-        <dl class="studio-stock-list">
-          <div><dt>In stock <small>6+ units</small></dt><dd>{{ inventory.in_stock }}</dd></div>
-          <div><dt>Low stock <small>1–5 units</small></dt><dd>{{ inventory.low_stock }}</dd></div>
-          <div><dt>Out of stock</dt><dd>{{ inventory.out_of_stock }}</dd></div>
-        </dl>
+        <p class="studio-note">{{ inventory_total }} active catalogue product{{ inventory_total|pluralize }}</p>
+        <div class="studio-inventory-chart">
+          <div class="studio-pie" aria-hidden="true"{% if inventory_total %} style="--in-stock-end: {{ inventory_in_stock_end|unlocalize }}%; --low-stock-end: {{ inventory_low_stock_end|unlocalize }}%"{% endif %}></div>
+          <dl class="studio-stock-list">
+            <div class="studio-in-stock"><dt>In stock <small>6+ units</small></dt><dd>{{ inventory.in_stock }}</dd></div>
+            <div class="studio-low-stock"><dt>Low stock <small>1–5 units</small></dt><dd>{{ inventory.low_stock }}</dd></div>
+            <div class="studio-out-of-stock"><dt>Out of stock</dt><dd>{{ inventory.out_of_stock }}</dd></div>
+          </dl>
+        </div>
         <a class="studio-action" href="{{ products_url }}">View inventory</a>
       </section>
       {% endif %}
