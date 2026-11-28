@@ -50,6 +50,8 @@ describe('storefront flows', () => {
     const floatingLink = screen.getByRole('link', {name: 'Open EROMA on WhatsApp Web'})
     expect(floatingLink.getAttribute('href')).toMatch(/^https:\/\/web\.whatsapp\.com\/send\?phone=[0-9]+$/)
     expect(floatingLink).toHaveAttribute('target', '_blank')
+    const supportNumber = new URL(floatingLink.href).searchParams.get('phone')
+    expect(screen.getByRole('link', {name: 'Call EROMA'})).toHaveAttribute('href', `tel:+${supportNumber}`)
     fireEvent.click(screen.getByRole('button', {name: 'Contact Us', exact: true}))
     expect(screen.getByRole('link', {name: 'Chat with EROMA'})).toHaveAttribute('href', floatingLink.getAttribute('href'))
   })
