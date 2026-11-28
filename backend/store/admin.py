@@ -21,6 +21,7 @@ from .models import (
     CouponRedemption,
     FooterPageContent,
     HomepageBanner,
+    NewsletterSubscriber,
     Offer,
     Order,
     OrderItem,
@@ -29,6 +30,7 @@ from .models import (
     ProductReview,
     StoreLocation,
     SiteBranding,
+    SOCIAL_PLATFORMS,
     UserProfile,
     WishlistItem,
 )
@@ -158,11 +160,11 @@ admin_site.register(Group)
 
 @admin.register(CallbackRequest, site=admin_site)
 class CallbackRequestAdmin(admin.ModelAdmin):
-    list_display = ("name", "phone", "email", "city", "postal_code", "status", "created_at")
-    list_filter = ("status", "created_at")
+    list_display = ("name", "phone", "email", "city", "postal_code", "status", "notification_sent", "created_at")
+    list_filter = ("status", "notification_sent", "created_at")
     search_fields = ("name", "email", "phone", "city", "postal_code", "message")
     list_editable = ("status",)
-    readonly_fields = ("created_at",)
+    readonly_fields = ("created_at", "notification_sent")
     ordering = ("-created_at",)
 
 
@@ -454,8 +456,30 @@ class StoreLocationAdmin(admin.ModelAdmin):
 
 @admin.register(SiteBranding, site=admin_site)
 class SiteBrandingAdmin(admin.ModelAdmin):
-    list_display = ("id", "logo_alt_text", "updated_at")
-    fields = ("logo", "logo_alt_text")
+    list_display = ("__str__", "assistant_mode", "updated_at")
+    fieldsets = (
+        ("Branding", {"fields": ("logo", "logo_alt_text")}),
+        ("Social profiles", {"fields": SOCIAL_PLATFORMS}),
+        ("Shopping assistant", {"fields": ("assistant_mode",)}),
+    )
+
+    def has_add_permission(self, request):
+        return super().has_add_permission(request) and not SiteBranding.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(NewsletterSubscriber, site=admin_site)
+class NewsletterSubscriberAdmin(admin.ModelAdmin):
+    list_display = ("email", "subscribed_at")
+    list_filter = ("subscribed_at",)
+    search_fields = ("email",)
+    readonly_fields = ("email", "subscribed_at")
+    ordering = ("-subscribed_at",)
+
+    def has_add_permission(self, request):
+        return False
 
 
 class OrderItemInline(admin.TabularInline):

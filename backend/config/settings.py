@@ -94,6 +94,7 @@ else:
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@eroma.in")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+SUPPORT_NOTIFICATION_EMAIL = os.getenv("SUPPORT_NOTIFICATION_EMAIL", "hello@eroma.in").strip()
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND",
     "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
@@ -128,3 +129,4 @@ REST_FRAMEWORK = {
 from datetime import timedelta
 SIMPLE_JWT = {"ACCESS_TOKEN_LIFETIME": timedelta(minutes=30), "REFRESH_TOKEN_LIFETIME": timedelta(days=1)}
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {"recommendations": "20/hour", "store_chat": "60/hour", "order_tracking_lookup": "20/hour", "contact_message": "10/hour", "password_reset": "5/hour", "password_reset_confirm": "10/hour"}
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["newsletter"] = "10/hour"

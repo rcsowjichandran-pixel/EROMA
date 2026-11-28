@@ -275,13 +275,16 @@ const footerGroups=[
   {title:'SERVICES',links:['Dismantling','Re-installation','Complaints']},
   {title:'NEED HELP?',links:['My Account','Track Order','Contact Us','Policies']},
 ]
-const socialLinks=[
-  {name:'Facebook',image:'/images/social/facebook.svg',url:'https://www.facebook.com/search/top?q=EROMA%20furniture'},
-  {name:'Instagram',image:'/images/social/instagram.svg',url:'https://www.instagram.com/explore/search/keyword/?q=eroma%20furniture'},
-  {name:'YouTube',image:'/images/social/youtube.svg',url:'https://www.youtube.com/results?search_query=EROMA+furniture'},
-  {name:'Pinterest',image:'/images/social/pinterest.svg',url:'https://www.pinterest.com/search/pins/?q=EROMA%20furniture'},
-  {name:'LinkedIn',image:'/images/social/linkedin.svg',url:'https://www.linkedin.com/search/results/companies/?keywords=EROMA%20furniture'},
-]
+const socialPlatforms = {
+  facebook:'Facebook', instagram:'Instagram', youtube:'YouTube', pinterest:'Pinterest', linkedin:'LinkedIn',
+}
+const defaultSocialLinks = {
+  facebook:'https://www.facebook.com/search/top?q=EROMA%20furniture',
+  instagram:'https://www.instagram.com/explore/search/keyword/?q=eroma%20furniture',
+  youtube:'https://www.youtube.com/results?search_query=EROMA+furniture',
+  pinterest:'https://www.pinterest.com/search/pins/?q=EROMA%20furniture',
+  linkedin:'https://www.linkedin.com/search/results/companies/?keywords=EROMA%20furniture',
+}
 const paymentBrands=['VISA','Mastercard','RuPay','UPI','COD']
 const footerInfoCopy={
   'Blogs':'Ideas and inspiration for comfortable, thoughtful homes. Explore the EROMA collection and find pieces for your space.',
@@ -783,6 +786,7 @@ export default function App(){
     {page==='admin'&&isStaff&&<main className="content"><div className="pagehead"><span className="eyebrow">STORE MANAGEMENT</span><h1>Admin <i>studio.</i></h1><FileDownloadButton path="/admin/sales-report/" filename="EROMA-sales-report.csv" label="Download sales report (CSV)" className="outline"/></div>{adminStats&&<div className="admin-stat-cards">{[['Sales',money(adminStats.sales)],['Orders',adminStats.orders],['Customers',adminStats.users],['Products',adminStats.products],['Pending orders',adminStats.pending_orders],['Low stock',adminStats.low_stock]].map(([label,value])=><article key={label}><span>{label}</span><b>{value}</b></article>)}</div>}<div className="adminlayout"><form className="summary" onSubmit={createProduct}><h3>Add a product</h3><input required placeholder="Product name" value={form.name||''} onChange={e=>setForm({...form,name:e.target.value})}/><input required placeholder="Unique slug e.g. cloud-3-seater" value={form.slug||''} onChange={e=>setForm({...form,slug:e.target.value})}/><select required value={form.category||''} onChange={e=>setForm({...form,category:e.target.value})}><option value="">Select category</option>{categories.map(c=><option value={c.id} key={c.id}>{c.parent_name?`${c.parent_name}  -  ${c.name}`:c.name}</option>)}</select><textarea required placeholder="Description" value={form.description||''} onChange={e=>setForm({...form,description:e.target.value})}/><input required type="number" placeholder="Price in INR" value={form.price||''} onChange={e=>setForm({...form,price:e.target.value})}/><input placeholder="Image URL (optional)" value={form.image_url||''} onChange={e=>setForm({...form,image_url:e.target.value})}/><label className="upload-field">Upload a high-quality product photo<input type="file" accept="image/*" onChange={e=>setProductImage(e.target.files?.[0]||null)}/>{productImage&&<small>{productImage.name}</small>}</label><input placeholder="Material" value={form.material||''} onChange={e=>setForm({...form,material:e.target.value})}/><input type="number" placeholder="Stock" value={form.stock||''} onChange={e=>setForm({...form,stock:e.target.value})}/><button className="darkbtn full" disabled={busy}>Create product</button></form><div><h3>Products ({products.length})</h3><p className="muted">Use the SKU to find the exact model before uploading its photos.</p>{products.map(p=><div className="adminrow product-adminrow" key={p.id}><img src={image(p)} alt=""/><div className="product-admin-info"><b>{p.name}</b><span>{p.sku&&`${p.sku} | `}{money(p.price)}</span><label className="upload-small">{p.images?.some(image=>image.is_primary)||p.image_url?'Replace main photo':'Add main photo'}<input type="file" accept="image/*" disabled={busy} onChange={e=>uploadProductImage(p,e.target.files?.[0])}/></label><label className="upload-small">Add alternate photos<input type="file" accept="image/*" multiple disabled={busy} onChange={e=>uploadProductGallery(p,e.target)}/></label>{p.images?.length>1&&<div className="admin-gallery-photos">{p.images.map(shot=><img key={shot.id} src={shot.image} alt={shot.alt_text||p.name}/>)}</div>}</div></div>)}<button className="outline" onClick={load}>Refresh products</button><p><a href={ADMIN_URL} target="_blank" rel="noopener noreferrer">Open Django admin</a></p></div></div></main>}
     {page==='admin'&&isStaff&&<HeroCarouselAdmin slides={heroBanners} onChanged={load}/>}
     {page==='admin'&&isStaff&&<BrandLogoAdmin branding={branding} onSave={saveBrandLogo}/>}
+    {page==='admin'&&isStaff&&<StoreSettingsAdmin branding={branding} onSaved={setBranding}/>}
     {page==='admin'&&isStaff&&<StoreLocationsAdmin locations={storeLocations} storeForm={storeForm} setStoreForm={setStoreForm} storeImage={storeImage} setStoreImage={setStoreImage} createStoreLocation={createStoreLocation} replaceStoreImage={replaceStoreImage} setStorePublished={setStorePublished} deleteStoreLocation={deleteStoreLocation} busy={busy}/>}
     {page==='admin'&&isStaff&&<FooterContentAdmin pages={footerPages} onSaved={updated=>setFooterPages(old=>old.map(item=>item.id===updated.id?updated:item))}/>}
     {page==='shop'&&submittedSearch&&!searchLoading&&<section className="search-recommendations"><div className="section-title"><div><span className="eyebrow">SEARCH RESULTS  &mdash; {filtered.length} FOUND</span><h2>Results for <i>&ldquo;{submittedSearch}&rdquo;</i></h2></div></div>{!filtered.length&&<p className="search-empty">No products match this search. Try a broader term like sofa, table, or chair.</p>}<div className="section-title recommendation-title"><div><span className="eyebrow">PICKED FOR YOUR SEARCH</span><h2>More to <i>consider.</i></h2></div><span>{recommendationsLoading?'Finding good matches…':recommendationReason}</span></div>{!recommendationsLoading&&recommendedProducts.length>0?<ProductGrid products={recommendedProducts} onOpen={openProduct} onAdd={add} onWishlist={toggleWishlist} wishlistedIds={wishlistedIds} cart={cart} showCartStatus={false}/>:!recommendationsLoading&&<p className="search-empty">Explore these products, or try a different furniture style.</p>}</section>}
@@ -792,14 +796,20 @@ export default function App(){
     
     <section className="faq-banner"><div className="faq-heading"><span className="eyebrow">HERE WHEN YOU NEED US</span><h2>Questions, <i>answered.</i></h2><p>Quick help for choosing and caring for your EROMA pieces.</p></div><div className="faq-list">{commonFaqs.map((faq,index)=><article className={`faq-item ${openFaq===index?'open':''}`} key={faq.q}><button aria-expanded={openFaq===index} onClick={()=>setOpenFaq(openFaq===index?-1:index)}><span>{faq.q}</span><Plus size={16}/></button>{openFaq===index&&<p>{faq.a}</p>}</article>)}</div></section>
     <footer className="site-footer">
-      <div className="newsletter"><div><span className="eyebrow">THE EROMA LETTER</span><h2>Subscribe to our newsletter</h2><p>Be the first to know about new arrivals, offers and home inspiration.</p></div><form onSubmit={e=>{e.preventDefault();setNotice('Thanks for joining the EROMA newsletter.');e.currentTarget.reset()}}><input required type="email" placeholder="Please enter your email" aria-label="Your email address"/><button>Subscribe <ArrowRight size={15}/></button></form></div>
+      <NewsletterSignup/>
       <div className="footer-columns">{footerGroups.map(group=><div className="footer-column" key={group.title}><h3>{group.title}</h3>{group.links.map(label=><button key={label} type="button" onClick={()=>handleFooterLink(label)}>{label}</button>)}</div>)}
-        <div className="footer-social-payment"><h3>SOCIAL ACCOUNTS</h3><div className="footer-social-links">{socialLinks.map(social=><a key={social.name} href={social.url} target="_blank" rel="noopener noreferrer" aria-label={`Find EROMA on ${social.name}`} title={social.name}><img src={social.image} alt={social.name}/></a>)}</div><h3 className="pay-using-heading">PAY USING</h3><div className="footer-payment-logos">{paymentBrands.map(brand=><button type="button" key={brand} onClick={()=>chooseFooterPayment(brand==='COD'?'cod':'razorpay')} aria-label={`Choose ${brand==='COD'?'Cash on Delivery':`${brand} using Razorpay`}`}>{brand}</button>)}</div></div>
+        <div className="footer-social-payment"><FooterSocialLinks branding={branding}/><h3 className="pay-using-heading">PAY USING</h3><div className="footer-payment-logos">{paymentBrands.map(brand=><button type="button" key={brand} onClick={()=>chooseFooterPayment(brand==='COD'?'cod':'razorpay')} aria-label={`Choose ${brand==='COD'?'Cash on Delivery':`${brand} using Razorpay`}`}>{brand}</button>)}</div></div>
       </div>
       <div className="footer-benefits"><button type="button" onClick={()=>openFooterInfo('Free Delivery')}><Truck className="benefit-icon" size={23}/>FREE DELIVERY &mdash; T&amp;C</button><button type="button" onClick={()=>openFooterInfo('Easy Returns')}><RotateCcw className="benefit-icon" size={23}/>EASY RETURNS</button><button type="button" onClick={()=>openFooterInfo('Secure Payment')}><ShieldCheck className="benefit-icon" size={23}/>SECURE PAYMENT</button></div>
       <div className="footer-bottom"><span>&copy; 2026 EROMA Home. All rights reserved.</span><div className="footer-legal-links">{['Policies'].map(label=><button type="button" key={label} onClick={()=>handleFooterLink(label)}>{label}</button>)}</div></div>
     </footer>
-    <div className="contact-dock">{page==='call'?null:page==='home'?<button type="button" className="callback-launch" onClick={()=>go('call')} aria-label="Call EROMA" title="Call EROMA"><PhoneCall size={20}/></button>:<button type="button" className="callback-launch" onClick={showCallbackForm} aria-label="Request a callback" title="Request a callback"><PhoneCall size={20}/></button>}<a className="whatsapp-link" href={whatsappWebUrl} target="_blank" rel="noopener noreferrer" aria-label="Open EROMA on WhatsApp Web" title="Message EROMA"><MessageCircle size={21}/></a><button className="chat-launch" onClick={()=>setChatOpen(o=>!o)} aria-label={chatOpen?'Close EROMA assistant':'Open EROMA assistant'}><span className="chat-avatar">e</span><span>Ask Eri</span></button></div>
+    <div className="contact-dock">
+      {page==='call'?null:page==='home'
+        ? <button type="button" className="callback-launch" onClick={()=>go('call')} aria-label="Call EROMA" title="Call EROMA"><PhoneCall size={20}/></button>
+        : <button type="button" className="callback-launch" onClick={showCallbackForm} aria-label="Request a callback" title="Request a callback"><PhoneCall size={20}/></button>}
+      <a className="whatsapp-link" href={whatsappWebUrl} target="_blank" rel="noopener noreferrer" aria-label="Open EROMA on WhatsApp Web" title="Message EROMA"><MessageCircle size={21}/></a>
+      {branding?.assistant_mode!=='off'&&<button className="chat-launch" onClick={()=>setChatOpen(o=>!o)} aria-label={chatOpen?'Close EROMA assistant':'Open EROMA assistant'}><span className="chat-avatar">e</span><span>Ask Eri</span></button>}
+    </div>
     {callbackOpen&&<CallbackRequestDialog form={callbackForm} setForm={setCallbackForm} onSubmit={submitCallback} busy={callbackBusy} error={callbackError} sent={callbackSent} onClose={()=>setCallbackOpen(false)}/> }
     {chatOpen&&<section className="chat-panel" aria-label="EROMA shopping assistant"><header><span className="chat-avatar">e</span><div><b>EROMA assistant</b><small>Here to help you feel at home</small></div><button type="button" onClick={()=>setChatOpen(false)} aria-label="Close chat"><X size={17}/></button></header><div className="chat-messages">{chatMessages.map((message,index)=><p className={`chat-message ${message.from}`} key={index}>{renderChatText(message.text)}{message.from==='bot'&&message.source==='store-help'&&<small className="chat-source">Store guide</small>}</p>)}{chatSending&&<p className="chat-message bot chat-typing">Eri is thinking...</p>}<div ref={chatEndRef}/></div><form onSubmit={sendChat}><input value={chatText} onChange={e=>setChatText(e.target.value)} placeholder="Ask about your home" aria-label="Message EROMA assistant" disabled={chatSending}/><button aria-label="Send message" disabled={chatSending||!chatText.trim()}><Send size={17}/></button></form></section>}
     {modal&&<div className="overlay" onClick={()=>{setModal('');setError('')}}><form className="modal" onClick={e=>e.stopPropagation()} onSubmit={modal==='account'?e=>{e.preventDefault();setModal('')}:modal==='forgot'?requestPasswordReset:modal==='reset'?confirmPasswordReset:submitAuth}><button type="button" className="close" onClick={()=>{setModal('');setError('')}}><X/></button>{modal==='account'?<><h2>Hello, {user?.username}</h2>{error&&<p className="modal-error" role="alert">{error}</p>}<p>{user?.email}</p>{isStaff&&<button type="button" className="darkbtn full" onClick={()=>{setModal('');go('admin')}}>Open admin studio</button>}<button type="button" className="outline full" onClick={()=>{setModal('');go('profile')}}>Profile & addresses</button><button type="button" className="outline full" onClick={logout}>Sign out</button></>:modal==='forgot'?<><span className="eyebrow">ACCOUNT RECOVERY</span><h2>Reset your password</h2><p>Enter the email address linked to your account. If it matches, we&apos;ll send reset instructions.</p>{passwordResetMessage&&<p className="reset-inline-message" role="status">{passwordResetMessage}</p>}{error&&<p className="modal-error" role="alert">{error}</p>}<input required type="email" placeholder="Email address" value={form.email||''} onChange={e=>setForm({...form,email:e.target.value})}/><button className="darkbtn full" disabled={busy}>{busy?"Sending…":"Send reset link"}</button><button type="button" className="textbtn" onClick={()=>setModal('login')}>Back to sign in</button></>:modal==='reset'?<><span className="eyebrow">ACCOUNT RECOVERY</span><h2>Choose a new password</h2>{error&&<p className="modal-error" role="alert">{error}</p>}<input required minLength="8" autoComplete="new-password" type="password" placeholder="New password (8+ characters)" value={form.new_password||''} onChange={e=>setForm({...form,new_password:e.target.value})}/><input required minLength="8" autoComplete="new-password" type="password" placeholder="Confirm new password" value={form.confirm_password||''} onChange={e=>setForm({...form,confirm_password:e.target.value})}/><button className="darkbtn full" disabled={busy}>{busy?"Updating…":"Update password"}</button></>:<><span className="eyebrow">WELCOME TO EROMA</span><h2>{modal==='register'?'Create account':'Welcome back.'}</h2>{notice&&<p className="modal-feedback" role="status">{notice}</p>}{error&&<p className="modal-error" role="alert">{error}</p>}{modal==='register'&&<input required placeholder="Email" type="email" value={form.email||''} onChange={e=>setForm({...form,email:e.target.value})}/>}<input required autoComplete="username" placeholder="Username" value={form.username||''} onChange={e=>{setForm({...form,username:e.target.value});setError('')}}/><input required autoComplete={modal==='register'?'new-password':'current-password'} placeholder="Password (8+ characters)" type="password" value={form.password||''} onChange={e=>{setForm({...form,password:e.target.value});setError('')}}/><button className="darkbtn full" disabled={busy}>{modal==='register'?'Create account':'Sign in'}</button>{modal==='login'&&<button type="button" className="textbtn" onClick={()=>{setError('');setPasswordResetMessage('');setModal('forgot')}}>Forgot password?</button>}<button type="button" className="textbtn" onClick={()=>{setError('');setModal(modal==='register'?'login':'register')}}>{modal==='register'?'Already registered? Sign in':'New here? Create an account'}</button></>}</form></div>}
@@ -932,6 +942,101 @@ function HeroCarouselAdmin({slides,onChanged}){
  function pickSlide(value){setIsNew(false);setSelectedId(value);const item=adminSlides.find(row=>row.id===Number(value));setDraft(item?{...item}:null);setImageFile(null);setMessage('')}
  async function save(event){event.preventDefault();if(!draft)return;if(isNew&&!imageFile){setMessage('Choose an image before adding a slide.');return}setSaving(true);setMessage('');try{const payload=new FormData();['title','subtitle','description','eyebrow','offer_text','offer_code','card_title','card_subtitle','cta_label','category_name','theme','alt_text','link_url','sort_order','is_active'].forEach(key=>payload.append(key,draft[key]??''));if(imageFile)payload.append('image',imageFile);const result=await api(isNew?'/banners/':`/banners/${selectedId}/`,{method:isNew?'POST':'PATCH',body:payload});setIsNew(false);setSelectedId(String(result.id));setDraft({...result});setImageFile(null);await onChanged();setAdminSlides(await api('/banners/?manage=1'));setMessage('Carousel slide saved.')}catch(error){setMessage(error.message||'Could not save this slide.')}finally{setSaving(false)}}
  return <section className="content hero-carousel-admin"><div className="pagehead"><span className="eyebrow">HOMEPAGE CONTENT</span><h1>Hero <i>carousel.</i></h1><p>Manage each campaign slide, card image, message, offer code, and collection link.</p></div><div className="hero-admin-toolbar"><label>Choose a slide<select value={isNew?'new':selectedId} onChange={event=>event.target.value==='new'?startNew():pickSlide(event.target.value)}><option value="" disabled>Select a slide</option>{adminSlides.map((item,index)=><option key={item.id} value={item.id}>{index+1}. {item.title}{item.is_active?'':'  &mdash; hidden'}</option>)}{isNew&&<option value="new">New slide</option>}</select></label><button type="button" className="outline" onClick={startNew}>+ Add slide</button></div><div className="hero-carousel-admin-layout"><form className="summary hero-carousel-admin-form" onSubmit={save}>{draft&&<><div className="hero-admin-fields"><label>Small tag<input value={draft.eyebrow||''} onChange={event=>setDraft({...draft,eyebrow:event.target.value})}/></label><label>Main heading<input required value={draft.title||''} onChange={event=>setDraft({...draft,title:event.target.value})}/></label><label>Highlighted line<input value={draft.subtitle||''} onChange={event=>setDraft({...draft,subtitle:event.target.value})}/></label><label>Short description<textarea rows="3" value={draft.description||''} onChange={event=>setDraft({...draft,description:event.target.value})}/></label><label>Offer detail (optional)<input value={draft.offer_text||''} onChange={event=>setDraft({...draft,offer_text:event.target.value})}/></label><label>Active coupon code (optional)<input value={draft.offer_code||''} onChange={event=>setDraft({...draft,offer_code:event.target.value})}/></label><label>Featured image card title<input value={draft.card_title||''} onChange={event=>setDraft({...draft,card_title:event.target.value})}/></label><label>Featured image card caption<input value={draft.card_subtitle||''} onChange={event=>setDraft({...draft,card_subtitle:event.target.value})}/></label><label>Button label<input value={draft.cta_label||''} onChange={event=>setDraft({...draft,cta_label:event.target.value})}/></label><label>Shop category name<input placeholder="Sofas, Dining Furniture" value={draft.category_name||''} onChange={event=>setDraft({...draft,category_name:event.target.value})}/></label><label>Slide colour<select value={draft.theme||'ruby'} onChange={event=>setDraft({...draft,theme:event.target.value})}><option value="ruby">Ruby festive</option><option value="midnight">Midnight blue</option><option value="walnut">Warm walnut</option><option value="olive">Olive living</option></select></label><label>Sort position<input type="number" min="0" value={draft.sort_order??0} onChange={event=>setDraft({...draft,sort_order:event.target.value})}/></label><label>Image description<input value={draft.alt_text||''} onChange={event=>setDraft({...draft,alt_text:event.target.value})}/></label><label>Optional destination URL<input type="url" placeholder="https://example.com" value={draft.link_url||''} onChange={event=>setDraft({...draft,link_url:event.target.value})}/></label></div><label className="upload-field">Upload or replace slide image<input type="file" accept="image/*" onChange={event=>setImageFile(event.target.files?.[0]||null)}/>{imageFile&&<small>{imageFile.name}</small>}</label><label className="checkline"><input type="checkbox" checked={!!draft.is_active} onChange={event=>setDraft({...draft,is_active:event.target.checked})}/> Show this slide on the homepage</label><button className="darkbtn full" disabled={saving}>{saving?'Saving…':isNew?'Add carousel slide':'Save slide changes'}</button>{message&&<small role="status">{message}</small>}</>}</form><div className="hero-carousel-admin-preview"><h3>Slide image preview</h3><img src={previewUrl} alt={draft?.alt_text||draft?.title||''}/><b>{draft?.title||'New carousel slide'}</b><p>{draft?.subtitle}</p><span>{adminSlides.filter(item=>item.is_active).length} active slides appear in the customer carousel.</span></div></div></section>
+}
+
+function FooterSocialLinks({branding}) {
+  return <><h3>SOCIAL ACCOUNTS</h3><div className="footer-social-links">
+    {Object.entries(socialPlatforms).map(([key,name])=><a key={key}
+      href={branding?.[key]||defaultSocialLinks[key]} target="_blank" rel="noopener noreferrer"
+      aria-label={branding?.[key]?`EROMA on ${name}`:`Find EROMA on ${name}`}
+      title={name}><img src={`/images/social/${key}.svg`} alt=""/></a>)}
+  </div></>
+}
+
+function NewsletterSignup() {
+  const [saving,setSaving]=useState(false)
+  const [feedback,setFeedback]=useState(null)
+
+  async function subscribe(event) {
+    event.preventDefault()
+    const form=event.currentTarget
+    const email=new FormData(form).get('email')
+    setSaving(true)
+    setFeedback(null)
+    try {
+      const result=await api('/newsletter/',{method:'POST',body:JSON.stringify({email})})
+      form.reset()
+      setFeedback({text:result.detail})
+    } catch(error) {
+      setFeedback({text:error.message,error:true})
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <div className="newsletter">
+    <div><span className="eyebrow">THE EROMA LETTER</span><h2>Subscribe to our newsletter</h2>
+      <p>Be the first to know about new arrivals, offers and home inspiration.</p>
+      {feedback&&<p role={feedback.error?'alert':'status'}>{feedback.text}</p>}
+    </div>
+    <form onSubmit={subscribe}>
+      <input required name="email" type="email" autoComplete="email" maxLength={254}
+        placeholder="Please enter your email" aria-label="Your email address"/>
+      <button disabled={saving}>{saving?'Subscribing…':'Subscribe'} <ArrowRight size={15}/></button>
+    </form>
+  </div>
+}
+
+function StoreSettingsAdmin({branding,onSaved}) {
+  const [saving,setSaving]=useState(false)
+  const [feedback,setFeedback]=useState(null)
+  const adminSections = {
+    contactmessage:'Contact enquiries', callbackrequest:'Callback requests', newslettersubscriber:'Newsletter subscribers',
+    coupon:'Coupons', offer:'Offers', productreview:'Product reviews', order:'Orders',
+  }
+
+  async function save(event) {
+    event.preventDefault()
+    const values=Object.fromEntries(new FormData(event.currentTarget))
+    setSaving(true)
+    setFeedback(null)
+    try {
+      onSaved(await api('/branding/',{method:'PATCH',body:JSON.stringify(values)}))
+      setFeedback({text:'Storefront settings saved.'})
+    } catch(error) {
+      setFeedback({text:error.message,error:true})
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <section className="content footer-admin" aria-labelledby="store-settings-title">
+    <div className="pagehead"><h2 id="store-settings-title">Storefront settings</h2></div>
+    <div className="footer-admin-layout">
+      {branding?<form className="summary footer-admin-form" onSubmit={save}>
+        <h3>Social profiles</h3>
+        <p>Enter direct profile URLs. Blank fields keep the original footer links.</p>
+        {Object.entries(socialPlatforms).map(([key,name])=><label key={key}>{name}
+          <input name={key} type="url" maxLength={200} defaultValue={branding[key]||''}/>
+        </label>)}
+        <label>Shopping assistant
+          <select name="assistant_mode" defaultValue={branding.assistant_mode||'gemini'}>
+            <option value="guide">Store guide</option>
+            <option value="gemini">Gemini with safety filters</option>
+            <option value="off">Disabled</option>
+          </select>
+        </label>
+        <button className="darkbtn full" disabled={saving}>{saving?'Saving…':'Save storefront settings'}</button>
+        {feedback&&<p role={feedback.error?'alert':'status'}>{feedback.text}</p>}
+      </form>:<p>Storefront settings are currently unavailable.</p>}
+      <nav className="summary" aria-label="Store operations">
+        <h3>Store operations</h3>
+        <p>Open these tools using your Django admin account.</p>
+        {Object.entries(adminSections).map(([model,label])=><a className="outline" key={model}
+          href={`${ADMIN_URL}store/${model}/`} target="_blank" rel="noopener noreferrer">{label}</a>)}
+      </nav>
+    </div>
+  </section>
 }
 
 function BrandLogoAdmin({branding,onSave}){

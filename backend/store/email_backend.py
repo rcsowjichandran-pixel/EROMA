@@ -1,6 +1,13 @@
 import requests
 from django.conf import settings
+from django.core.mail import get_connection
 from django.core.mail.backends.base import BaseEmailBackend
+
+
+def transactional_connection():
+    if settings.RESEND_API_KEY:
+        return get_connection("store.email_backend.ResendEmailBackend")
+    return None
 
 
 class ResendEmailBackend(BaseEmailBackend):
@@ -15,6 +22,8 @@ class ResendEmailBackend(BaseEmailBackend):
                 "subject": message.subject,
                 "text": message.body,
             }
+            if message.reply_to:
+                payload["reply_to"] = message.reply_to
             try:
                 if not settings.RESEND_API_KEY:
                     raise RuntimeError("Resend API key is missing.")

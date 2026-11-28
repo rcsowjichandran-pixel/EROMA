@@ -28,6 +28,7 @@ service-account*.json
 node_modules/
 frontend/dist/
 backend/.venv/
+/backend/staticfiles/
 __pycache__/
 **/__pycache__/
 *.py[cod]

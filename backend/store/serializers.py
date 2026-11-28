@@ -6,6 +6,7 @@ from rest_framework import serializers
 from .checkout_amounts import checkout_amounts, coupon_discount
 from .contact_fields import PHONE_PATTERN, PIN_PATTERN, PHONE_ERROR, PIN_ERROR
 from .models import Address, Category, CategoryImage, HomepageBanner, Product, ProductImage, Order, OrderItem, ProductReview, UserProfile, WishlistItem, StoreLocation, Offer, FooterPageContent, SiteBranding
+from .models import SOCIAL_PLATFORMS, social_link_errors
 
 
 def coupon_category_ids(coupon):
@@ -100,10 +101,27 @@ class FooterPageContentSerializer(serializers.ModelSerializer):
         fields = ("id", "key", "title", "eyebrow", "summary", "body", "image", "image_alt_text", "action_label", "action_url", "is_active", "updated_at")
 
 
+class NewsletterSignupSerializer(serializers.Serializer):
+    email = serializers.EmailField(max_length=254)
+
+
 class SiteBrandingSerializer(serializers.ModelSerializer):
     class Meta:
         model = SiteBranding
-        fields = ("id", "logo", "logo_alt_text", "updated_at")
+        fields = ("id", "logo", "logo_alt_text", "updated_at", "assistant_mode", *SOCIAL_PLATFORMS)
+
+    def validate(self, attrs):
+        errors = social_link_errors(attrs)
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs
+
+    def update(self, instance, validated_data):
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save(update_fields=[*validated_data, "updated_at"])
+        instance.refresh_from_db()
+        return instance
 
 
 class ProductImageSerializer(serializers.ModelSerializer):

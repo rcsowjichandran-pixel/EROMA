@@ -156,21 +156,63 @@ class FooterPageContent(models.Model):
         return self.title
 
 
+SOCIAL_PLATFORMS = ("facebook", "instagram", "youtube", "pinterest", "linkedin")
+
+
+def social_link_errors(values):
+    from urllib.parse import urlsplit
+    errors = {}
+    for platform in SOCIAL_PLATFORMS:
+        value = values.get(platform)
+        if not value:
+            continue
+        url = urlsplit(value)
+        domain = f"{platform}.com"
+        if (url.scheme != "https" or url.netloc.lower() not in (domain, f"www.{domain}")
+                or url.path.strip("/") in ("", "search", "search/top", "results")):
+            errors[platform] = f"Enter a direct HTTPS profile URL on {domain}."
+    return errors
+
+
 class SiteBranding(models.Model):
     logo = models.ImageField(upload_to="branding/", blank=True)
     logo_alt_text = models.CharField(max_length=180, default="EROMA Furniture — Elegance in Every Corner")
     updated_at = models.DateTimeField(auto_now=True)
+    facebook = models.URLField(blank=True)
+    instagram = models.URLField(blank=True)
+    youtube = models.URLField(blank=True)
+    pinterest = models.URLField(blank=True)
+    linkedin = models.URLField(blank=True)
+    assistant_mode = models.CharField(
+        max_length=12,
+        choices=[("guide", "Store guide"), ("gemini", "Gemini with safety filters"), ("off", "Disabled")],
+        default="gemini",
+    )
 
     class Meta:
         verbose_name = "Site branding"
         verbose_name_plural = "Site branding"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        errors = social_link_errors({platform: getattr(self, platform) for platform in SOCIAL_PLATFORMS})
+        if errors:
+            raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
         self.pk = 1
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return "EROMA site logo"
+        return "EROMA storefront settings"
+
+
+class NewsletterSubscriber(models.Model):
+    email = models.EmailField(unique=True)
+    subscribed_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.email
 
 
 class Coupon(models.Model):
@@ -412,6 +454,7 @@ class OrderItem(models.Model):
 
 
 class CallbackRequest(models.Model):
+    notification_sent = models.BooleanField(default=False)
     STATUS_CHOICES = [("new", "New"), ("contacted", "Contacted"), ("closed", "Closed")]
 
     name = models.CharField(max_length=120)

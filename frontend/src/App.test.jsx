@@ -44,6 +44,28 @@ describe('storefront flows', () => {
     vi.unstubAllGlobals()
   })
 
+  it('renders configured social profiles and submits newsletter signups', async () => {
+    const instagram = 'https://www.instagram.com/eroma_example/'
+    const subscribe = vi.fn(() => ({detail: 'Thanks for joining the EROMA newsletter.'}))
+    mockStore({'/branding/': {instagram, assistant_mode: 'off'}, '/newsletter/': subscribe})
+    render(<App/>)
+
+    expect(await screen.findByRole('link', {name: 'EROMA on Instagram'})).toHaveAttribute('href', instagram)
+    expect(screen.getByRole('link', {name: 'Find EROMA on Facebook'})).toHaveAttribute(
+      'href', 'https://www.facebook.com/search/top?q=EROMA%20furniture',
+    )
+    expect(screen.queryByRole('button', {name: 'Open EROMA assistant'})).not.toBeInTheDocument()
+
+    const email = screen.getByRole('textbox', {name: 'Your email address'})
+    fireEvent.change(email, {target: {value: 'shopper@example.org'}})
+    fireEvent.click(screen.getByRole('button', {name: 'Subscribe', exact: true}))
+    expect(await screen.findByText('Thanks for joining the EROMA newsletter.')).toHaveAttribute('role', 'status')
+    expect(subscribe).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST', body: JSON.stringify({email: 'shopper@example.org'}),
+    }))
+    expect(email).toHaveValue('')
+  })
+
   it('links the floating WhatsApp button and Contact Us directly to WhatsApp Web', () => {
     mockStore()
     render(<App/>)

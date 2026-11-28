@@ -32,9 +32,9 @@ Production security settings can be explicitly overridden with `SECURE_SSL_REDIR
 
 ## Email
 
-For local development, `EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend` prints reset messages to the Django terminal. With `DEBUG=True`, the password-reset endpoint also returns a development-only reset URL.
+With `DEBUG=True` and no provider configured, outgoing messages appear in the Django terminal. The password-reset endpoint also returns a development-only reset URL.
 
-For password reset on Render Free, set `RESEND_API_KEY`, `DEFAULT_FROM_EMAIL` (an address on your verified Resend domain), and `FRONTEND_URL=https://eroma-1.onrender.com` on the Python backend service. Keep `DEBUG=False`. A Resend key routes password reset emails through HTTPS, since Render Free blocks outbound SMTP on ports 25, 465, and 587. After deploying, request a reset using an account you control and follow the email link to confirm delivery and routing.
+For Resend over HTTPS, set `RESEND_API_KEY`, `DEFAULT_FROM_EMAIL` (an address on your verified sender domain), and `FRONTEND_URL` (the live storefront URL) on the Python backend service. Keep `DEBUG=False`. A Resend key routes password resets, contact enquiries, and callback notifications through Resend. Set `SUPPORT_NOTIFICATION_EMAIL` to the support inbox if it differs from `hello@eroma.in`. After deployment, use an account you control to verify a password reset, contact enquiry, and callback notification. Check that replying to the support notification addresses the submitting customer. [Resend send-email reference](https://resend.com/docs/api-reference/emails/send-email)
 
 If the backend can reach an SMTP provider and you prefer SMTP, leave `RESEND_API_KEY` empty and configure:
 
@@ -43,7 +43,13 @@ If the backend can reach an SMTP provider and you prefer SMTP, leave `RESEND_API
 - `EMAIL_USE_TLS` or `EMAIL_USE_SSL`
 - `DEFAULT_FROM_EMAIL`, `FRONTEND_URL`
 
-Contact Us messages and callback requests are saved in Django admin even if email notification fails. Check the message's `notification_sent` field to see whether email delivery also succeeded. Password resets still require a functioning email provider outside local development.
+Contact enquiries and callback requests are saved in Django admin even if email notification fails. The notification flag records acceptance by the configured mail backend. Verify receipt in the support inbox during deployment checks. Newsletter signups appear under **Newsletter subscribers** in Django admin, where authorized staff can search and remove subscriber records.
+
+## Storefront settings
+
+Apply migrations with `python manage.py migrate` before serving the updated app. Open **Admin Studio → Storefront settings** to enter the official Facebook, Instagram, YouTube, Pinterest, and LinkedIn profile URLs. Each configured URL replaces the original footer link for that platform. Blank fields keep the original links.
+
+Eri uses Gemini when a backend `GEMINI_API_KEY` is configured and falls back to the local store guide when the key is absent or the provider is unavailable. The chat route applies a storefront scope check and Gemini content filters. Staff can select **Store guide** to use local responses or **Disabled** to hide the storefront launcher and disable the chat endpoint. [Gemini safety settings](https://ai.google.dev/gemini-api/docs/safety-settings)
 
 ## Durable uploaded product images
 

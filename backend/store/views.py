@@ -19,7 +19,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
-from django.core.mail import EmailMessage, get_connection, send_mail
+from django.core.mail import EmailMessage, send_mail
 from django.db import transaction
 from django.db.models import Sum, Q, F, Avg, Count, Max, Prefetch
 from django.http import FileResponse, HttpResponse
@@ -28,11 +28,14 @@ from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.contrib.auth.tokens import default_token_generator
 from .models import Address, CallbackRequest, ContactMessage, Coupon, CouponRedemption, Product, ProductImage, ProductReview, Category, HomepageBanner, Order, OrderItem, UserProfile, WishlistItem, StoreLocation, Offer, FooterPageContent, SiteBranding
+from .models import NewsletterSubscriber
 from .serializers import AddressSerializer, RegisterSerializer, ProductSerializer, ProductImageSerializer, CategorySerializer, HomepageBannerSerializer, OrderSerializer, CreateOrderSerializer, ProductReviewSerializer, UserProfileSerializer, WishlistItemSerializer, OrderLineInputSerializer, StoreLocationSerializer, OfferBannerSerializer, FooterPageContentSerializer, SiteBrandingSerializer, coupon_category_ids
+from .serializers import NewsletterSignupSerializer
 from .permissions import IsStaffOrReadOnly
 from .contact_fields import PHONE_PATTERN, PIN_PATTERN, PHONE_ERROR, PIN_ERROR
 from .checkout_amounts import coupon_discount
 from .order_bills import render_order_bill
+from .email_backend import transactional_connection
 
 logger = logging.getLogger(__name__)
 
@@ -428,6 +431,12 @@ class StoreChatView(APIView):
             response["X-EROMA-Assistant-Status"] = provider_status
             return response
 
+        mode = SiteBranding.objects.values_list("assistant_mode", flat=True).filter(pk=1).first() or "gemini"
+        if mode == "off":
+            return Response(
+                {"detail": "The store assistant is unavailable. Please use Contact Us for help."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         raw_messages = request.data.get("messages", []) if isinstance(request.data, dict) else []
         if not isinstance(raw_messages, list):
             return Response({"detail": "Send chat messages as a list."}, status=status.HTTP_400_BAD_REQUEST)
@@ -487,8 +496,7 @@ class StoreChatView(APIView):
         support_reply = None
         if any(phrase in latest for phrase in ("return", "returns", "refund", "exchange")):
             support_reply = (
-                "For a return or exchange, contact our support team with your order number and item name so they can check the terms."
-                "You can also email hello@eroma.in with those details."
+                "For a return or exchange, use Contact Us or email hello@eroma.in with your order number and item name so our team can check the next step."
             )
         elif any(phrase in latest for phrase in ("complaint", "damaged", "damage", "broken", "missing part", "service")):
             support_reply = (
@@ -601,6 +609,8 @@ class StoreChatView(APIView):
                 fallback = "I couldn't find that policy detail in the published help pages. Please open Policies in the footer or contact hello@eroma.in."
         if support_reply:
             fallback = support_reply
+        if mode == "guide":
+            return chat_response(fallback, "store-help", "guide-mode")
         if not settings.GEMINI_API_KEY:
             return chat_response(fallback, "store-help", "gemini-key-missing")
 
@@ -638,12 +648,12 @@ class StoreChatView(APIView):
         }
         try:
             generated = None
-            model_names = list(dict.fromkeys((
+            model_names = list(dict.fromkeys(filter(None, (
                 settings.GEMINI_MODEL,
                 settings.GEMINI_FALLBACK_MODEL,
                 "gemini-flash-latest",
                 "gemini-3.1-flash-lite",
-            )))
+            ))))
             for model_index, model_name in enumerate(model_names):
                 gemini_request = urllib.request.Request(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
@@ -977,6 +987,18 @@ class OrderTrackingLookupView(APIView):
         })
 
 
+class NewsletterSignupView(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "newsletter"
+
+    def post(self, request):
+        serializer = NewsletterSignupSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        NewsletterSubscriber.objects.get_or_create(email=email.lower())
+        return Response({"detail": "Thanks for joining the EROMA newsletter."}, status=200)
+
+
 class ContactMessageView(APIView):
     permission_classes = [permissions.AllowAny]
     throttle_classes = [ScopedRateThrottle]
@@ -999,15 +1021,17 @@ class ContactMessageView(APIView):
         enquiry = ContactMessage.objects.create(name=name, email=email, phone=phone, message=message)
         body = f"Name: {name}\nEmail: {email}\nPhone: {phone or 'Not provided'}\n\nMessage:\n{message}"
         try:
-            EmailMessage(
-                subject=f"EROMA website enquiry from {name}",
+            sent = EmailMessage(
+                subject=f"EROMA website enquiry #{enquiry.pk}",
                 body=body,
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                to=["hello@eroma.in"],
+                to=[settings.SUPPORT_NOTIFICATION_EMAIL],
                 reply_to=[email],
+                connection=transactional_connection(),
             ).send(fail_silently=False)
-            enquiry.notification_sent = True
-            enquiry.save(update_fields=("notification_sent",))
+            if sent:
+                enquiry.notification_sent = True
+                enquiry.save(update_fields=("notification_sent",))
         except Exception:
             logger.exception("Unable to deliver EROMA contact enquiry")
         return Response({
@@ -1053,17 +1077,21 @@ class CallbackRequestView(APIView):
             message=message,
         )
         try:
-            EmailMessage(
-                subject=f"EROMA callback request #{callback.pk} from {name}",
+            sent = EmailMessage(
+                subject=f"EROMA callback request #{callback.pk}",
                 body=(
                     f"Name: {name}\nEmail: {email}\nPhone: {phone}\n"
                     f"PIN code: {postal_code}\nCity: {city or 'Not provided'}\n\n"
                     f"Message:\n{message}"
                 ),
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                to=["hello@eroma.in"],
+                to=[settings.SUPPORT_NOTIFICATION_EMAIL],
                 reply_to=[email],
+                connection=transactional_connection(),
             ).send(fail_silently=False)
+            if sent:
+                callback.notification_sent = True
+                callback.save(update_fields=("notification_sent",))
         except Exception:
             logger.exception("Callback request %s was saved but its notification email failed", callback.pk)
 
@@ -1308,14 +1336,10 @@ class PasswordResetRequestView(APIView):
             frontend = getattr(settings, "FRONTEND_URL", "http://localhost:5173").rstrip("/")
             reset_link = f"{frontend}/?reset={uid}.{token}"
             try:
-                connection = (
-                    get_connection("store.email_backend.ResendEmailBackend")
-                    if settings.RESEND_API_KEY else None
-                )
                 sent = send_mail(
                     "Reset your EROMA password",
                     f"Use this link to reset your password: {reset_link}",
-                    settings.DEFAULT_FROM_EMAIL, [user.email], connection=connection,
+                    settings.DEFAULT_FROM_EMAIL, [user.email], connection=transactional_connection(),
                 )
                 if not sent:
                     raise RuntimeError("Password reset email was not sent.")
